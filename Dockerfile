@@ -41,7 +41,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY . .
 
-RUN mkdir -p /app/downloads
+RUN mkdir -p /tmp/mm_video_downloads
 
 
 # ==========================================
