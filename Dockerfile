@@ -2,7 +2,6 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-
 # =========================================================
 # System dependencies
 # =========================================================
@@ -12,6 +11,7 @@ RUN apt-get update \
         ffmpeg \
         curl \
         ca-certificates \
+        unzip \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -22,7 +22,6 @@ RUN apt-get update \
 RUN curl -fsSL https://deno.land/install.sh | sh
 
 ENV DENO_INSTALL=/root/.deno
-
 ENV PATH="${DENO_INSTALL}/bin:${PATH}"
 
 
@@ -32,9 +31,7 @@ ENV PATH="${DENO_INSTALL}/bin:${PATH}"
 
 COPY requirements.txt .
 
-RUN pip install \
-    --no-cache-dir \
-    -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 
 # =========================================================
@@ -42,11 +39,6 @@ RUN pip install \
 # =========================================================
 
 COPY . .
-
-
-# =========================================================
-# Download directory
-# =========================================================
 
 RUN mkdir -p /tmp/mm_video_downloads
 
@@ -56,13 +48,6 @@ RUN mkdir -p /tmp/mm_video_downloads
 # =========================================================
 
 ENV PYTHONUNBUFFERED=1
-
-
-# =========================================================
-# Render
-# =========================================================
-
-EXPOSE 10000
 
 
 # =========================================================
