@@ -2,9 +2,7 @@ import os
 import re
 import asyncio
 import logging
-import threading
 from pathlib import Path
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import yt_dlp
 from dotenv import load_dotenv
@@ -36,6 +34,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is missing")
 
+
 BASE_DIR = Path(__file__).resolve().parent
 DOWNLOAD_DIR = BASE_DIR / "downloads"
 
@@ -58,66 +57,6 @@ logger = logging.getLogger(__name__)
 
 
 # =========================================================
-# RENDER HEALTH SERVER
-# =========================================================
-
-class HealthHandler(BaseHTTPRequestHandler):
-
-    def do_GET(self):
-
-        if self.path in ["/", "/health"]:
-
-            response = (
-                "MM Video Downloader Bot is running."
-            ).encode("utf-8")
-
-            self.send_response(200)
-
-            self.send_header(
-                "Content-Type",
-                "text/plain; charset=utf-8"
-            )
-
-            self.send_header(
-                "Content-Length",
-                str(len(response))
-            )
-
-            self.end_headers()
-
-            self.wfile.write(response)
-
-        else:
-
-            self.send_response(404)
-            self.end_headers()
-
-    def log_message(self, format, *args):
-        return
-
-
-def start_health_server():
-
-    port = int(
-        os.environ.get(
-            "PORT",
-            "10000"
-        )
-    )
-
-    server = HTTPServer(
-        ("0.0.0.0", port),
-        HealthHandler,
-    )
-
-    logger.info(
-        f"Health server listening on 0.0.0.0:{port}"
-    )
-
-    server.serve_forever()
-
-
-# =========================================================
 # SUPPORTED URL
 # =========================================================
 
@@ -131,7 +70,7 @@ YOUTUBE_REGEX = re.compile(
 TIKTOK_REGEX = re.compile(
     r"^https?://"
     r"(www\.)?"
-    r"(tiktok\.com|vm\.tiktok\.com|vt\.tiktok\.com)/.+",
+    r"(tiktok\.com|vt\.tiktok\.com)/.+",
     re.IGNORECASE,
 )
 
@@ -141,6 +80,13 @@ def is_supported_url(url: str) -> bool:
     return bool(
         YOUTUBE_REGEX.match(url)
         or TIKTOK_REGEX.match(url)
+    )
+
+
+def is_tiktok_url(url: str) -> bool:
+
+    return bool(
+        TIKTOK_REGEX.match(url)
     )
 
 
@@ -177,6 +123,7 @@ def main_menu():
                 url="https://t.me/superraizo7"
             )
         ],
+
     ]
 
     return InlineKeyboardMarkup(keyboard)
@@ -204,8 +151,8 @@ async def start(
         "• 1080p\n"
         "• 🎵 MP3\n\n"
 
-        "🔗 Download လုပ်ရန် "
-        "Video Link ပို့ပါ။"
+        "🔗 Download လုပ်ရန်\n"
+        "YouTube / TikTok Video Link ပို့ပါ။"
     )
 
     await update.message.reply_text(
@@ -240,9 +187,11 @@ async def button_handler(
             "❓ <b>အသုံးပြုနည်း</b>\n\n"
 
             "1️⃣ YouTube / TikTok Link ပို့ပါ\n"
-            "2️⃣ Bot က Available Quality တွေကို စစ်ပါမယ်\n"
-            "3️⃣ ရနိုင်တဲ့ Quality ကို ရွေးပါ\n"
-            "4️⃣ Download ပြီးရင် File ပြန်ပို့ပေးပါမယ်။",
+            "2️⃣ Bot က Video Information စစ်ပါမယ်\n"
+            "3️⃣ Quality ရွေးပါ\n"
+            "4️⃣ Download ပြီးရင် File ပြန်ပို့ပေးပါမယ်။\n\n"
+
+            "🎵 MP3 လည်း Download လုပ်နိုင်ပါတယ်။",
 
             parse_mode="HTML",
         )
@@ -254,7 +203,7 @@ async def button_handler(
 
             "YouTube & TikTok Downloader\n\n"
 
-            "⚡ Dynamic Quality Detection\n"
+            "⚡ Dynamic Format Detection\n"
             "📥 Video Downloader\n"
             "🎵 MP3 Downloader\n\n"
 
@@ -278,7 +227,8 @@ def get_video_info(url: str):
 
         "noplaylist": True,
 
-        "extract_flat": False,
+        "skip_download": True,
+
     }
 
     with yt_dlp.YoutubeDL(options) as ydl:
@@ -290,33 +240,85 @@ def get_video_info(url: str):
 
 
 # =========================================================
-# AVAILABLE QUALITY DETECTION
+# FORMAT ANALYSIS
 # =========================================================
 
-def detect_available_qualities(info):
+def analyze_formats(info):
 
     formats = info.get(
         "formats",
         []
     )
 
-    available_heights = set()
+    video_formats = []
+
+    heights = []
 
     for fmt in formats:
 
-        height = fmt.get("height")
-
-        video_codec = fmt.get("vcodec")
+        vcodec = fmt.get(
+            "vcodec"
+        )
 
         if (
-            height
-            and video_codec
-            and video_codec != "none"
+            not vcodec
+            or vcodec == "none"
         ):
+            continue
 
-            available_heights.add(
-                int(height)
-            )
+        height = fmt.get(
+            "height"
+        )
+
+        if height:
+
+            try:
+                height = int(height)
+                heights.append(height)
+
+            except (
+                TypeError,
+                ValueError
+            ):
+                pass
+
+        video_formats.append(fmt)
+
+    max_height = (
+        max(heights)
+        if heights
+        else None
+    )
+
+    return {
+        "has_video": bool(video_formats),
+        "max_height": max_height,
+        "formats": video_formats,
+    }
+
+
+# =========================================================
+# AVAILABLE QUALITY DETECTION
+# =========================================================
+
+def detect_available_qualities(
+    info,
+    url: str,
+):
+
+    analysis = analyze_formats(
+        info
+    )
+
+    has_video = analysis[
+        "has_video"
+    ]
+
+    max_height = analysis[
+        "max_height"
+    ]
+
+    available = {}
 
     target_qualities = [
         240,
@@ -326,15 +328,30 @@ def detect_available_qualities(info):
         1080,
     ]
 
-    available = {}
+    # -----------------------------------------------------
+    # If yt-dlp cannot report height but video exists,
+    # allow quality buttons.
+    #
+    # This is especially useful for some TikTok formats.
+    # -----------------------------------------------------
+
+    if has_video and max_height is None:
+
+        for quality in target_qualities:
+            available[quality] = True
+
+        return available
+
+    # -----------------------------------------------------
+    # Normal YouTube / TikTok detection
+    # -----------------------------------------------------
 
     for quality in target_qualities:
 
-        # We only claim a quality is available
-        # if yt-dlp has a video format at
-        # exactly that resolution or close enough below it.
-        available[quality] = (
-            quality in available_heights
+        available[quality] = bool(
+            has_video
+            and max_height
+            and max_height >= quality
         )
 
     return available
@@ -395,7 +412,6 @@ def quality_keyboard(
             row = []
 
     if row:
-
         keyboard.append(row)
 
     keyboard.append(
@@ -442,7 +458,7 @@ async def handle_url(
 
     status = await update.message.reply_text(
         "🔎 <b>Video Information စစ်နေပါတယ်...</b>\n\n"
-        "⏳ Available formats တွေကို yt-dlp နဲ့ စစ်နေပါတယ်။",
+        "⏳ Available formats တွေကို စစ်နေပါတယ်။",
         parse_mode="HTML",
     )
 
@@ -466,17 +482,22 @@ async def handle_url(
         minutes = duration // 60
         seconds = duration % 60
 
-        available = (
-            detect_available_qualities(
-                info
-            )
+        available = detect_available_qualities(
+            info,
+            url,
         )
 
-        context.user_data["url"] = url
+        context.user_data[
+            "url"
+        ] = url
 
         context.user_data[
             "available_qualities"
         ] = available
+
+        context.user_data[
+            "video_title"
+        ] = title
 
         quality_status = []
 
@@ -537,8 +558,7 @@ async def handle_url(
 
         await status.edit_text(
             "❌ <b>Video Information ရယူမရပါ။</b>\n\n"
-            "Link မှန်/မမှန် ပြန်စစ်ပြီး "
-            "ထပ်ကြိုးစားပါ။",
+            "Link မှန်/မမှန် ပြန်စစ်ပြီး ထပ်ကြိုးစားပါ။",
             parse_mode="HTML",
         )
 
@@ -575,22 +595,32 @@ def download_video(
         )
     )
 
+    # -----------------------------------------------------
+    # IMPORTANT
+    #
+    # bestvideo + bestaudio:
+    # YouTube high quality
+    #
+    # best:
+    # TikTok / single-file formats
+    #
+    # The fallback chain is important.
+    # -----------------------------------------------------
+
+    format_selector = (
+        f"bestvideo[height<={height}]"
+        f"+bestaudio/"
+        f"best[height<={height}]/"
+        f"best"
+    )
+
     options = {
 
         "outtmpl": output,
 
         "noplaylist": True,
 
-        # Prefer exact requested resolution.
-        # Fall back to the best available format
-        # not exceeding requested height.
-        "format":
-            f"bestvideo[height={height}]"
-            f"+bestaudio/"
-            f"best[height={height}]/"
-            f"bestvideo[height<={height}]"
-            f"+bestaudio/"
-            f"best[height<={height}]",
+        "format": format_selector,
 
         "merge_output_format": "mp4",
 
@@ -599,6 +629,9 @@ def download_video(
         "no_warnings": True,
 
         "restrictfilenames": True,
+
+        "overwrites": True,
+
     }
 
     with yt_dlp.YoutubeDL(
@@ -610,27 +643,69 @@ def download_video(
             download=True,
         )
 
+        requested_downloads = (
+            info.get(
+                "requested_downloads"
+            )
+            or []
+        )
+
+        # -------------------------------------------------
+        # Find actual downloaded file
+        # -------------------------------------------------
+
+        possible_files = []
+
+        for item in requested_downloads:
+
+            filepath = item.get(
+                "filepath"
+            )
+
+            if filepath:
+
+                possible_files.append(
+                    Path(filepath)
+                )
+
         filename = ydl.prepare_filename(
             info
         )
 
-        possible_files = [
+        possible_files.append(
+            Path(filename)
+        )
 
-            Path(filename),
-
-            Path(filename).with_suffix(".mp4"),
-
-            Path(filename).with_suffix(".mkv"),
-
-            Path(filename).with_suffix(".webm"),
-
-        ]
+        possible_files.append(
+            Path(filename).with_suffix(
+                ".mp4"
+            )
+        )
 
         for path in possible_files:
 
             if path.exists():
 
                 return str(path)
+
+        # -------------------------------------------------
+        # Search user directory as final fallback
+        # -------------------------------------------------
+
+        files = list(
+            user_dir.glob("*")
+        )
+
+        if files:
+
+            files.sort(
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+
+            return str(
+                files[0]
+            )
 
         raise FileNotFoundError(
             "Downloaded video file not found"
@@ -690,6 +765,8 @@ def download_mp3(
         "no_warnings": True,
 
         "restrictfilenames": True,
+
+        "overwrites": True,
     }
 
     with yt_dlp.YoutubeDL(
@@ -707,250 +784,37 @@ def download_mp3(
 
         mp3_file = Path(
             filename
-        ).with_suffix(".mp3")
+        ).with_suffix(
+            ".mp3"
+        )
 
-        if not mp3_file.exists():
+        if mp3_file.exists():
 
-            raise FileNotFoundError(
-                "MP3 file not found"
+            return str(
+                mp3_file
             )
 
-        return str(mp3_file)
+        # Final fallback
+
+        files = list(
+            user_dir.glob("*.mp3")
+        )
+
+        if files:
+
+            files.sort(
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+
+            return str(
+                files[0]
+            )
+
+        raise FileNotFoundError(
+            "MP3 file not found"
+        )
 
 
 # =========================================================
-# QUALITY CALLBACK
-# =========================================================
-
-async def quality_handler(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-
-    query = update.callback_query
-
-    await query.answer()
-
-    if query.data == "unavailable":
-
-        await query.answer(
-            "❌ ဒီ Video မှာ ဒီ Quality မရှိပါ။",
-            show_alert=True,
-        )
-
-        return
-
-    _, quality = query.data.split(
-        "|",
-        1
-    )
-
-    url = context.user_data.get(
-        "url"
-    )
-
-    available = context.user_data.get(
-        "available_qualities",
-        {}
-    )
-
-    if not url:
-
-        await query.message.reply_text(
-            "❌ Download session မတွေ့ပါ။"
-        )
-
-        return
-
-    if quality != "mp3":
-
-        height = int(
-            quality.replace(
-                "p",
-                ""
-            )
-        )
-
-        if not available.get(
-            height,
-            False
-        ):
-
-            await query.answer(
-                f"❌ {quality} မရနိုင်ပါ။",
-                show_alert=True,
-            )
-
-            return
-
-    await query.message.edit_text(
-        f"⏳ <b>{quality}</b> Download လုပ်နေပါတယ်...\n\n"
-        "📥 Server က Download လုပ်နေပါတယ်။\n"
-        "ခဏစောင့်ပါ။",
-        parse_mode="HTML",
-    )
-
-    user_id = (
-        update.effective_user.id
-    )
-
-    file_path = None
-
-    try:
-
-        if quality == "mp3":
-
-            file_path = await asyncio.to_thread(
-                download_mp3,
-                url,
-                user_id,
-            )
-
-            await query.message.reply_audio(
-                audio=file_path,
-                caption=(
-                    "🎵 <b>MP3 Download Complete</b>"
-                ),
-                parse_mode="HTML",
-            )
-
-        else:
-
-            file_path = await asyncio.to_thread(
-                download_video,
-                url,
-                quality,
-                user_id,
-            )
-
-            await query.message.reply_video(
-                video=file_path,
-                caption=(
-                    "🎬 <b>Download Complete</b>\n\n"
-                    f"📥 Quality: {quality}"
-                ),
-                parse_mode="HTML",
-                supports_streaming=True,
-            )
-
-    except Exception:
-
-        logger.exception(
-            "Download failed"
-        )
-
-        await query.message.reply_text(
-            "❌ <b>Download မအောင်မြင်ပါ။</b>\n\n"
-
-            "ဖြစ်နိုင်သောအကြောင်းရင်းများ:\n"
-            "• Video unavailable\n"
-            "• Server error\n"
-            "• File size ကြီးလွန်းခြင်း\n"
-            "• Format error\n"
-            "• Source က requested quality မပေးခြင်း\n\n"
-
-            "နောက်တစ်ကြိမ် ပြန်ကြိုးစားပါ။",
-            parse_mode="HTML",
-        )
-
-    finally:
-
-        if file_path:
-
-            try:
-
-                path = Path(
-                    file_path
-                )
-
-                if path.exists():
-
-                    path.unlink()
-
-            except Exception:
-
-                logger.warning(
-                    "File cleanup failed"
-                )
-
-
-# =========================================================
-# ERROR HANDLER
-# =========================================================
-
-async def error_handler(
-    update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-
-    logger.error(
-        "Unhandled exception",
-        exc_info=context.error,
-    )
-
-
-# =========================================================
-# MAIN
-# =========================================================
-
-def main():
-
-    print(
-        "🤖 MM Video Downloader Bot Started"
-    )
-
-    # Start Render HTTP health server
-    health_thread = threading.Thread(
-        target=start_health_server,
-        daemon=True,
-    )
-
-    health_thread.start()
-
-    # Start Telegram Bot
-    app = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .build()
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "start",
-            start,
-        )
-    )
-
-    app.add_handler(
-        CallbackQueryHandler(
-            button_handler,
-            pattern="^(download|help|about)$",
-        )
-    )
-
-    app.add_handler(
-        CallbackQueryHandler(
-            quality_handler,
-            pattern=r"^(quality\||unavailable)",
-        )
-    )
-
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT
-            & ~filters.COMMAND,
-            handle_url,
-        )
-    )
-
-    app.add_error_handler(
-        error_handler
-    )
-
-    app.run_polling(
-        allowed_updates=Update.ALL_TYPES
-    )
-
-
-if __name__ == "__main__":
-    main()
+# QUALITY
