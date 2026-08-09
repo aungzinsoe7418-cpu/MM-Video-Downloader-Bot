@@ -1185,11 +1185,14 @@ async def download_callback(
     )
 
 
-    await query.edit_message_text(
+        await query.edit_message_text(
 
         f"⏳ <b>{quality_label}</b> "
         "Download လုပ်နေပါတယ်...\n\n"
 
         "📥 Server က file ပြင်ဆင်နေပါတယ်။\n"
+        "⏳ ခဏစောင့်ပေးပါ..."
 
-        "ခဏစောင့်ပေး
+        ,
+        parse_mode="HTML"
+    )
