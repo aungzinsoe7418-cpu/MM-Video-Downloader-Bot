@@ -6,18 +6,17 @@ import tempfile
 import shutil
 from pathlib import Path
 from urllib.parse import urlparse
+from html import escape
 
-import yt_dlp
 from dotenv import load_dotenv
+import yt_dlp
 
 from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
 )
-
 from telegram.constants import ChatAction
-
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -28,37 +27,49 @@ from telegram.ext import (
 )
 
 
-# =========================================================
+# ============================================================
 # ENVIRONMENT
-# =========================================================
+# ============================================================
 
 load_dotenv()
 
 
-# =========================================================
+# ============================================================
 # CONFIG
-# =========================================================
+# ============================================================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+BOT_TOKEN = os.getenv(
+    "BOT_TOKEN",
+    ""
+).strip()
 
 DEVELOPER_USERNAME = os.getenv(
     "DEVELOPER_USERNAME",
-    "superraizo7"
-).strip().lstrip("@")
+    "superraiz07"
+).strip()
 
-
-# Render Secret File / Environment Variable
 YOUTUBE_COOKIES_FILE = os.getenv(
     "YOUTUBE_COOKIES_FILE",
     "/etc/secrets/cookies.txt"
 ).strip()
 
+YOUTUBE_USER_AGENT = os.getenv(
+    "YOUTUBE_USER_AGENT",
+    ""
+).strip()
 
+
+# Telegram Bot API upload limit = 50 MB
+# Keep a small safety margin.
 MAX_FILE_SIZE_MB = 49
-MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+MAX_FILE_SIZE_BYTES = (
+    MAX_FILE_SIZE_MB * 1024 * 1024
+)
 
 
-DOWNLOAD_DIR = Path("/tmp/mm_video_downloads")
+DOWNLOAD_DIR = Path(
+    "/tmp/mm_video_downloads"
+)
 
 DOWNLOAD_DIR.mkdir(
     parents=True,
@@ -66,33 +77,41 @@ DOWNLOAD_DIR.mkdir(
 )
 
 
-# =========================================================
+# ============================================================
 # LOGGING
-# =========================================================
+# ============================================================
 
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format=(
+        "%(asctime)s - "
+        "%(name)s - "
+        "%(levelname)s - "
+        "%(message)s"
+    ),
     level=logging.INFO,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(
+    "MM_Video_Downloader"
+)
 
 
-# =========================================================
+# ============================================================
 # VALIDATION
-# =========================================================
+# ============================================================
 
 if not BOT_TOKEN:
 
     raise RuntimeError(
         "BOT_TOKEN is missing. "
-        "Please add BOT_TOKEN in Render Environment Variables."
+        "Add BOT_TOKEN to Render Environment Variables "
+        "or local .env file."
     )
 
 
-# =========================================================
+# ============================================================
 # SUPPORTED HOSTS
-# =========================================================
+# ============================================================
 
 YOUTUBE_HOSTS = {
     "youtube.com",
@@ -112,40 +131,32 @@ TIKTOK_HOSTS = {
 }
 
 
-# =========================================================
+# ============================================================
 # URL HELPERS
-# =========================================================
+# ============================================================
 
 def get_platform(url: str):
 
     try:
-
         parsed = urlparse(url)
-
         host = parsed.netloc.lower()
 
-        host = host.split(":")[0]
-
     except Exception:
-
         return None
 
+    host = host.split(":")[0]
 
     if (
         host in YOUTUBE_HOSTS
         or host.endswith(".youtube.com")
     ):
-
         return "youtube"
-
 
     if (
         host in TIKTOK_HOSTS
         or host.endswith(".tiktok.com")
     ):
-
         return "tiktok"
-
 
     return None
 
@@ -154,10 +165,6 @@ def is_supported_url(url: str):
 
     return get_platform(url) is not None
 
-
-# =========================================================
-# FILENAME
-# =========================================================
 
 def clean_filename(name: str):
 
@@ -173,48 +180,45 @@ def clean_filename(name: str):
         name
     ).strip()
 
-
     if not name:
-
         name = "video"
-
 
     return name[:150]
 
 
-# =========================================================
-# COOKIES
-# =========================================================
+# ============================================================
+# COOKIE FILE
+# ============================================================
 
 def get_cookie_file():
 
     candidates = []
 
-
-    # 1. Environment variable
-
     if YOUTUBE_COOKIES_FILE:
-
         candidates.append(
             Path(YOUTUBE_COOKIES_FILE)
         )
 
+    candidates.extend([
+        Path("/etc/secrets/cookies.txt"),
+        Path("cookies.txt"),
+    ])
 
-    # 2. Render Secret File
-
-    candidates.append(
-        Path("/etc/secrets/cookies.txt")
-    )
-
-
-    # 3. Local development
-
-    candidates.append(
-        Path("cookies.txt")
-    )
-
+    checked = set()
 
     for path in candidates:
+
+        try:
+
+            path = path.resolve()
+
+        except Exception:
+            continue
+
+        if path in checked:
+            continue
+
+        checked.add(path)
 
         try:
 
@@ -231,64 +235,67 @@ def get_cookie_file():
 
                 return str(path)
 
-        except Exception as e:
+        except Exception as error:
 
             logger.warning(
-                "Could not check cookie file %s: %s",
+                "Could not inspect cookie file %s: %s",
                 path,
-                e
+                error
             )
 
-
     logger.warning(
-        "YouTube cookies file NOT found."
+        "YouTube cookies file not found."
     )
 
     return None
 
 
-# =========================================================
-# BASE YT-DLP OPTIONS
-# =========================================================
+# ============================================================
+# COMMON YT-DLP OPTIONS
+# ============================================================
 
 def base_ydl_options():
 
     return {
 
+        # Output
         "quiet": True,
-
         "no_warnings": True,
-
         "noprogress": True,
 
-        "noplaylist": True,
-
-        "nocheckcertificate": True,
-
+        # Network
         "socket_timeout": 30,
-
         "retries": 3,
-
         "fragment_retries": 3,
 
+        # YouTube recommends <= 10 MB chunks
         "http_chunk_size": 10 * 1024 * 1024,
 
-        "concurrent_fragment_downloads": 4,
+        # One video only
+        "noplaylist": True,
 
+        # Continue partial downloads
+        "continuedl": True,
+
+        # Allow overwrite
+        "overwrites": True,
+
+        # Deno for JavaScript challenges
+        "js_runtimes": {
+            "deno": {}
+        },
     }
 
 
-# =========================================================
+# ============================================================
 # YOUTUBE OPTIONS
-# =========================================================
+# ============================================================
 
 def youtube_ydl_options(download=False):
 
     options = base_ydl_options()
 
-
     cookie_file = get_cookie_file()
-
 
     if cookie_file:
 
@@ -304,69 +311,43 @@ def youtube_ydl_options(download=False):
             "YouTube cookies are not available."
         )
 
+    if YOUTUBE_USER_AGENT:
 
-    # Modern YouTube extractor configuration.
-
-    options["extractor_args"] = {
-
-        "youtube": {
-
-            "player_client": [
-                "web",
-                "web_safari",
-                "web_embedded"
-            ]
-
+        options["http_headers"] = {
+            "User-Agent": YOUTUBE_USER_AGENT
         }
-
-    }
-
 
     if download:
 
-        options.update({
-
-            "continuedl": True,
-
-            "overwrites": True,
-
-        })
-
+        options["continuedl"] = True
+        options["overwrites"] = True
 
     return options
 
 
-# =========================================================
+# ============================================================
 # TIKTOK OPTIONS
-# =========================================================
+# ============================================================
 
 def tiktok_ydl_options(download=False):
 
     options = base_ydl_options()
 
-
     if download:
 
-        options.update({
-
-            "continuedl": True,
-
-            "overwrites": True,
-
-        })
-
+        options["continuedl"] = True
+        options["overwrites"] = True
 
     return options
 
 
-# =========================================================
-# GET VIDEO INFO
-# =========================================================
+# ============================================================
+# VIDEO INFORMATION
+# ============================================================
 
 def get_video_info_sync(url: str):
 
     platform = get_platform(url)
-
 
     if platform == "youtube":
 
@@ -374,13 +355,11 @@ def get_video_info_sync(url: str):
             download=False
         )
 
-
     elif platform == "tiktok":
 
         options = tiktok_ydl_options(
             download=False
         )
-
 
     else:
 
@@ -388,8 +367,9 @@ def get_video_info_sync(url: str):
             "Unsupported URL"
         )
 
-
-    with yt_dlp.YoutubeDL(options) as ydl:
+    with yt_dlp.YoutubeDL(
+        options
+    ) as ydl:
 
         return ydl.extract_info(
             url,
@@ -397,78 +377,16 @@ def get_video_info_sync(url: str):
         )
 
 
-# =========================================================
-# AVAILABLE QUALITY
-# =========================================================
-
-def get_available_qualities(info):
-
-    formats = info.get(
-        "formats",
-        []
-    )
-
-
-    heights = set()
-
-
-    for fmt in formats:
-
-        height = fmt.get("height")
-
-        vcodec = fmt.get(
-            "vcodec"
-        )
-
-
-        if (
-            height
-            and vcodec
-            and vcodec != "none"
-        ):
-
-            try:
-
-                heights.add(
-                    int(height)
-                )
-
-            except Exception:
-
-                pass
-
-
-    result = {}
-
-
-    for quality in [
-        240,
-        360,
-        480,
-        720,
-        1080
-    ]:
-
-        result[quality] = any(
-            h >= quality
-            for h in heights
-        )
-
-
-    return result
-
-
-# =========================================================
+# ============================================================
 # DOWNLOAD
-# =========================================================
+# ============================================================
 
-def download_media_sync(
+def download_video_sync(
     url: str,
     quality: str
 ):
 
     platform = get_platform(url)
-
 
     if platform == "youtube":
 
@@ -476,13 +394,11 @@ def download_media_sync(
             download=True
         )
 
-
     elif platform == "tiktok":
 
         options = tiktok_ydl_options(
             download=True
         )
-
 
     else:
 
@@ -490,22 +406,19 @@ def download_media_sync(
             "Unsupported URL"
         )
 
-
-    temp_dir = tempfile.mkdtemp(
+    unique_dir = tempfile.mkdtemp(
         prefix="mm_video_",
         dir=str(DOWNLOAD_DIR)
     )
 
-
     output_template = os.path.join(
-        temp_dir,
-        "%(title).120s [%(id)s].%(ext)s"
+        unique_dir,
+        "%(title).150s.%(ext)s"
     )
 
-
-    # =====================================================
+    # ========================================================
     # MP3
-    # =====================================================
+    # ========================================================
 
     if quality == "mp3":
 
@@ -518,9 +431,7 @@ def download_media_sync(
                 output_template,
 
             "postprocessors": [
-
                 {
-
                     "key":
                         "FFmpegExtractAudio",
 
@@ -529,32 +440,34 @@ def download_media_sync(
 
                     "preferredquality":
                         "192",
-
                 }
-
             ],
-
         })
 
-
-    # =====================================================
+    # ========================================================
     # VIDEO
-    # =====================================================
+    # ========================================================
 
     else:
 
-        height = int(quality)
+        try:
 
+            height = int(
+                quality
+            )
+
+        except ValueError:
+
+            raise ValueError(
+                "Invalid video quality."
+            )
 
         format_string = (
-
             f"bestvideo[height<={height}]"
             f"+bestaudio/"
             f"best[height<={height}]/"
             f"best"
-
         )
-
 
         options.update({
 
@@ -566,34 +479,31 @@ def download_media_sync(
 
             "merge_output_format":
                 "mp4",
-
         })
-
 
     try:
 
-        with yt_dlp.YoutubeDL(options) as ydl:
+        with yt_dlp.YoutubeDL(
+            options
+        ) as ydl:
 
             info = ydl.extract_info(
                 url,
                 download=True
             )
 
-
-        title = clean_filename(
-            info.get(
-                "title",
-                "video"
+            requested_title = clean_filename(
+                info.get(
+                    "title",
+                    "video"
+                )
             )
-        )
-
 
         files = [
-
             f
-
-            for f in Path(temp_dir).glob("*")
-
+            for f in Path(
+                unique_dir
+            ).glob("*")
             if (
                 f.is_file()
                 and f.suffix.lower()
@@ -602,55 +512,41 @@ def download_media_sync(
                     ".ytdl"
                 }
             )
-
         ]
-
 
         if not files:
 
             raise RuntimeError(
-                "Download finished but "
+                "Download completed but "
                 "output file was not found."
             )
 
-
-        preferred_extensions = {
-
-            ".mp4",
-            ".mp3",
-            ".m4a",
-            ".webm",
-            ".mkv"
-
-        }
-
-
         preferred = [
-
             f
-
             for f in files
-
             if f.suffix.lower()
-            in preferred_extensions
-
+            in {
+                ".mp4",
+                ".mp3",
+                ".m4a",
+                ".webm",
+                ".mkv"
+            }
         ]
-
 
         if preferred:
 
             file_path = max(
                 preferred,
-                key=lambda f: f.stat().st_size
+                key=lambda p: p.stat().st_size
             )
 
         else:
 
             file_path = max(
                 files,
-                key=lambda f: f.stat().st_size
+                key=lambda p: p.stat().st_size
             )
-
 
         if not file_path.exists():
 
@@ -658,56 +554,60 @@ def download_media_sync(
                 "Downloaded file does not exist."
             )
 
-
-        size = file_path.stat().st_size
-
+        file_size = file_path.stat().st_size
 
         logger.info(
-            "Downloaded %s - %.2f MB",
+            "Downloaded: %s | %.2f MB",
             file_path,
-            size / (1024 * 1024)
+            file_size / (
+                1024 * 1024
+            )
         )
 
-
-        if size > MAX_FILE_SIZE_BYTES:
+        if file_size > MAX_FILE_SIZE_BYTES:
 
             raise RuntimeError(
-                f"FILE_TOO_LARGE:{size}"
+                "FILE_TOO_LARGE:"
+                f"{file_size / (1024 * 1024):.1f}"
             )
 
-
-        return str(
-            file_path
-        ), title
-
+        return (
+            str(file_path),
+            requested_title
+        )
 
     except Exception:
 
         shutil.rmtree(
-            temp_dir,
+            unique_dir,
             ignore_errors=True
         )
 
         raise
 
 
-# =========================================================
+# ============================================================
 # START
-# =========================================================
+# ============================================================
 
 async def start(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    if not update.message:
+        return
+
     text = (
+        "👋 မင်္ဂလာပါ!\n\n"
 
-        "🎬 <b>MM Video Downloader</b>\n\n"
+        "🎬 YouTube / TikTok "
+        "Video Downloader Bot ဖြစ်ပါတယ်။\n\n"
 
-        "YouTube / TikTok Video Downloader\n\n"
+        "🔗 YouTube သို့မဟုတ် TikTok "
+        "Video Link ပို့ပါ။\n\n"
 
-        "📥 <b>Supported Quality</b>\n"
-
+        "📥 ရနိုင်သော Quality များ\n"
         "• 240p\n"
         "• 360p\n"
         "• 480p\n"
@@ -715,76 +615,19 @@ async def start(
         "• 1080p\n"
         "• 🎵 MP3\n\n"
 
-        "🔗 YouTube သို့မဟုတ် TikTok "
-        "Video Link ပို့ပါ။"
-
+        "👇 Video Link ပို့လိုက်ပါ။"
     )
-
 
     await update.message.reply_text(
-
-        text,
-
-        parse_mode="HTML",
-
-        reply_markup=main_menu()
-
+        text
     )
 
 
-# =========================================================
-# MAIN MENU
-# =========================================================
+# ============================================================
+# CONTACT DEVELOPER
+# ============================================================
 
-def main_menu():
-
-    keyboard = [
-
-        [
-
-            InlineKeyboardButton(
-                "📥 Download Video",
-                callback_data="download"
-            )
-
-        ],
-
-        [
-
-            InlineKeyboardButton(
-                "❓ Help",
-                callback_data="help"
-            ),
-
-            InlineKeyboardButton(
-                "ℹ️ About",
-                callback_data="about"
-            )
-
-        ],
-
-        [
-
-            InlineKeyboardButton(
-                "👨‍💻 Contact Developer",
-                url=f"https://t.me/{DEVELOPER_USERNAME}"
-            )
-
-        ]
-
-    ]
-
-
-    return InlineKeyboardMarkup(
-        keyboard
-    )
-
-
-# =========================================================
-# BUTTON HANDLER
-# =========================================================
-
-async def button_handler(
+async def contact_developer(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
@@ -793,273 +636,213 @@ async def button_handler(
 
     await query.answer()
 
+    username = (
+        DEVELOPER_USERNAME
+        .lstrip("@")
+    )
 
-    if query.data == "download":
+    text = (
+        "👨‍💻 Developer ကို ဆက်သွယ်ရန်\n\n"
 
-        await query.message.reply_text(
+        f"Telegram: @{username}\n\n"
 
-            "🔗 YouTube သို့မဟုတ် TikTok "
-            "Video Link ကို ပို့ပါ။"
+        "Bot Development / Custom Bot အတွက်\n"
+        "Developer ကို တိုက်ရိုက်ဆက်သွယ်နိုင်ပါတယ်။"
+    )
 
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "👨‍💻 Contact Developer",
+                url=(
+                    f"https://t.me/"
+                    f"{username}"
+                )
+            )
+        ]
+    ]
+
+    await query.edit_message_text(
+        text=text,
+        reply_markup=InlineKeyboardMarkup(
+            keyboard
         )
+    )
 
 
-    elif query.data == "help":
-
-        await query.message.reply_text(
-
-            "❓ <b>အသုံးပြုနည်း</b>\n\n"
-
-            "1️⃣ YouTube / TikTok Link ပို့ပါ\n"
-            "2️⃣ Video Information စစ်ပါမယ်\n"
-            "3️⃣ Quality ရွေးပါ\n"
-            "4️⃣ Download ပြီးရင် File ပြန်ပို့ပါမယ်။",
-
-            parse_mode="HTML"
-
-        )
-
-
-    elif query.data == "about":
-
-        await query.message.reply_text(
-
-            "🎬 <b>MM Video Downloader</b>\n\n"
-
-            "YouTube & TikTok Downloader\n\n"
-
-            "⚡ Dynamic Quality Detection\n"
-            "📥 Video Downloader\n"
-            "🎵 MP3 Downloader\n\n"
-
-            f"👨‍💻 Developer: @{DEVELOPER_USERNAME}",
-
-            parse_mode="HTML"
-
-        )
-
-
-# =========================================================
+# ============================================================
 # QUALITY KEYBOARD
-# =========================================================
+# ============================================================
 
-def quality_keyboard(
-    available
-):
+def build_quality_keyboard():
 
-    keyboard = []
+    keyboard = [
 
+        [
+            InlineKeyboardButton(
+                "240p",
+                callback_data="download|240"
+            ),
+            InlineKeyboardButton(
+                "360p",
+                callback_data="download|360"
+            ),
+        ],
 
-    row = []
+        [
+            InlineKeyboardButton(
+                "480p",
+                callback_data="download|480"
+            ),
+            InlineKeyboardButton(
+                "720p",
+                callback_data="download|720"
+            ),
+        ],
 
-
-    for quality in [
-        240,
-        360,
-        480,
-        720,
-        1080
-    ]:
-
-
-        if available.get(
-            quality,
-            False
-        ):
-
-            row.append(
-
-                InlineKeyboardButton(
-
-                    f"✅ {quality}p",
-
-                    callback_data=
-                        f"quality|{quality}"
-
-                )
-
+        [
+            InlineKeyboardButton(
+                "1080p",
+                callback_data="download|1080"
             )
+        ],
 
-        else:
-
-            row.append(
-
-                InlineKeyboardButton(
-
-                    f"❌ {quality}p",
-
-                    callback_data=
-                        "unavailable"
-
-                )
-
+        [
+            InlineKeyboardButton(
+                "🎵 MP3",
+                callback_data="download|mp3"
             )
+        ],
 
-
-        if len(row) == 2:
-
-            keyboard.append(row)
-
-            row = []
-
-
-    if row:
-
-        keyboard.append(row)
-
-
-    keyboard.append([
-
-        InlineKeyboardButton(
-
-            "🎵 MP3",
-
-            callback_data=
-                "quality|mp3"
-
-        )
-
-    ])
-
-
-    keyboard.append([
-
-        InlineKeyboardButton(
-
-            "👨‍💻 Contact Developer",
-
-            url=
-                f"https://t.me/{DEVELOPER_USERNAME}"
-
-        )
-
-    ])
-
+        [
+            InlineKeyboardButton(
+                "👨‍💻 Contact Developer",
+                callback_data="developer"
+            )
+        ],
+    ]
 
     return InlineKeyboardMarkup(
         keyboard
     )
 
 
-# =========================================================
+# ============================================================
 # HANDLE URL
-# =========================================================
+# ============================================================
 
 async def handle_url(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    if (
-        not update.message
-        or not update.message.text
-    ):
+    message = update.message
 
+    if (
+        not message
+        or not message.text
+    ):
         return
 
+    url = message.text.strip()
 
-    url = update.message.text.strip()
-
-
-    # If user pasted text around URL,
-    # take the first URL-like token.
-
-    match = re.search(
-        r"https?://\S+",
-        url
-    )
-
-
-    if match:
-
-        url = match.group(0)
-
-        url = url.rstrip(
-            ".,!?)]}"
-        )
-
+    # Take first token
+    url = url.split()[0]
 
     if not is_supported_url(url):
 
-        await update.message.reply_text(
-
-            "❌ YouTube သို့မဟုတ် TikTok "
-            "Link ပဲ ပို့ပါ။"
-
+        await message.reply_text(
+            "❌ ဒီ Link ကို support မလုပ်ပါဘူး။\n\n"
+            "YouTube သို့မဟုတ် TikTok Link ပဲ ပို့ပေးပါ။"
         )
 
         return
 
-
     platform = get_platform(url)
 
-
-    status = await update.message.reply_text(
-
-        "🔎 <b>Video Information "
-        "စစ်နေပါတယ်...</b>\n\n"
-        "⏳ ခဏစောင့်ပေးပါ။",
-
-        parse_mode="HTML"
-
+    status_message = await message.reply_text(
+        "🔎 Video Information ရှာနေပါတယ်...\n\n"
+        "⏳ ခဏစောင့်ပေးပါ။"
     )
-
 
     try:
 
-        info = await asyncio.to_thread(
-
-            get_video_info_sync,
-
-            url
-
+        await message.chat.send_action(
+            ChatAction.TYPING
         )
 
+        info = await asyncio.to_thread(
+            get_video_info_sync,
+            url
+        )
 
         title = info.get(
             "title",
             "Unknown"
         )
 
+        duration = info.get(
+            "duration"
+        )
 
-        duration = (
-            info.get(
-                "duration"
+        thumbnail = info.get(
+            "thumbnail"
+        )
+
+        # ====================================================
+        # DURATION
+        # ====================================================
+
+        if duration:
+
+            minutes = int(
+                duration // 60
             )
-            or 0
-        )
 
-
-        minutes = int(
-            duration // 60
-        )
-
-        seconds = int(
-            duration % 60
-        )
-
-
-        available = (
-            get_available_qualities(
-                info
+            seconds = int(
+                duration % 60
             )
-        )
 
+            duration_text = (
+                f"{minutes}:{seconds:02d}"
+            )
 
-        context.user_data[
-            "video_url"
-        ] = url
+        else:
 
+            duration_text = "Unknown"
 
-        context.user_data[
-            "video_title"
-        ] = title
+        # ====================================================
+        # AVAILABLE QUALITIES
+        # ====================================================
 
+        available_heights = set()
 
-        quality_status = []
+        for fmt in info.get(
+            "formats",
+            []
+        ):
 
+            height = fmt.get(
+                "height"
+            )
 
-        for quality in [
+            if height:
+
+                try:
+
+                    available_heights.add(
+                        int(height)
+                    )
+
+                except (
+                    ValueError,
+                    TypeError
+                ):
+                    pass
+
+        quality_lines = []
+
+        for q in [
             240,
             360,
             480,
@@ -1067,143 +850,167 @@ async def handle_url(
             1080
         ]:
 
-
-            if available.get(
-                quality,
-                False
+            if any(
+                h >= q
+                for h in available_heights
             ):
 
-                quality_status.append(
-                    f"✅ {quality}p"
+                quality_lines.append(
+                    f"✅ {q}p"
                 )
 
             else:
 
-                quality_status.append(
-                    f"❌ {quality}p"
+                quality_lines.append(
+                    f"❌ {q}p"
                 )
 
-
         platform_name = (
-
             "YouTube"
-
             if platform == "youtube"
-
             else "TikTok"
-
         )
 
+        safe_title = escape(
+            str(title)[:500]
+        )
 
         text = (
-
             "🎬 <b>Video Found</b>\n\n"
 
             f"📌 <b>Title:</b>\n"
-            f"{title[:500]}\n\n"
+            f"{safe_title}\n\n"
 
             f"🌐 <b>Platform:</b> "
             f"{platform_name}\n"
 
             f"⏱ <b>Duration:</b> "
-            f"{minutes}:{seconds:02d}\n\n"
+            f"{duration_text}\n\n"
 
             "📊 <b>Available Quality</b>\n"
 
             + "\n".join(
-                quality_status
+                quality_lines
             )
 
             + "\n\n"
 
-            "👇 <b>Download Quality "
-            "ရွေးပါ။</b>"
-
+            "👇 <b>Download Quality ရွေးပါ</b>"
         )
 
+        # Save current session
+        context.user_data[
+            "video_url"
+        ] = url
 
-        await status.edit_text(
+        context.user_data[
+            "video_title"
+        ] = title
 
-            text,
+        # ====================================================
+        # THUMBNAIL
+        # ====================================================
 
-            parse_mode="HTML",
+        if thumbnail:
 
-            reply_markup=
-                quality_keyboard(
-                    available
+            try:
+
+                await message.reply_photo(
+                    photo=thumbnail,
+                    caption=text,
+                    parse_mode="HTML",
+                    reply_markup=(
+                        build_quality_keyboard()
+                    )
                 )
 
+                await status_message.delete()
+
+                return
+
+            except Exception as error:
+
+                logger.warning(
+                    "Thumbnail send failed: %s",
+                    error
+                )
+
+        # ====================================================
+        # TEXT FALLBACK
+        # ====================================================
+
+        await status_message.edit_text(
+            text=text,
+            parse_mode="HTML",
+            reply_markup=(
+                build_quality_keyboard()
+            )
         )
 
+    except yt_dlp.utils.DownloadError as error:
 
-    except yt_dlp.utils.DownloadError as e:
-
-        error_text = str(e)
-
+        error_text = str(error)
 
         logger.error(
-            "Information extraction failed: %s",
+            "yt-dlp extraction failed:\n%s",
             error_text,
             exc_info=True
         )
 
-
         if (
             "Sign in to confirm" in error_text
             or "not a bot" in error_text
-            or "confirm you're not a bot" in error_text
+            or "confirm you're not a bot"
+            in error_text
         ):
 
-            await status.edit_text(
-
+            await status_message.edit_text(
                 "❌ <b>YouTube Access Error</b>\n\n"
 
                 "YouTube က ဒီ server request ကို "
                 "bot traffic လို့ သတ်မှတ်ထားပါတယ်။\n\n"
 
-                "🔐 Render မှာ YouTube "
-                "<b>cookies.txt</b> Secret File "
-                "ထည့်ထားဖို့လိုပါတယ်။",
+                "🔐 Render Secret File ထဲမှာ "
+                "<b>cookies.txt</b> ရှိ/မရှိ စစ်ပါ။\n\n"
+
+                "⚠️ Cookies သက်တမ်းကုန်ခြင်း၊ "
+                "YouTube verification သို့မဟုတ် "
+                "server-side restriction ဖြစ်နိုင်ပါတယ်။",
 
                 parse_mode="HTML"
-
             )
 
         else:
 
-            await status.edit_text(
+            await status_message.edit_text(
+                "❌ Video Information ရယူလို့ "
+                "မရပါဘူး။\n\n"
 
-                "❌ Video Information "
-                "ရယူလို့မရပါဘူး။\n\n"
-                "Link မှန်/မမှန် ပြန်စစ်ပြီး "
-                "ထပ်စမ်းပါ။"
-
+                "ခဏနေပြီး Link တစ်ခုနဲ့ "
+                "ထပ်စမ်းကြည့်ပါ။"
             )
 
-
-    except Exception as e:
+    except Exception as error:
 
         logger.error(
             "Information extraction failed: %s",
-            e,
+            error,
             exc_info=True
         )
 
+        await status_message.edit_text(
+            "❌ Video Information ရယူရာမှာ "
+            "Error ဖြစ်သွားပါတယ်။\n\n"
 
-        await status.edit_text(
-
-            "❌ Video Information "
-            "ရယူရာမှာ Error ဖြစ်သွားပါတယ်။\n\n"
-            "ခဏနေပြီး ပြန်စမ်းပါ။"
-
+            "ခဏနေပြီး ပြန်စမ်းကြည့်ပါ။"
         )
 
 
-# =========================================================
-# QUALITY CALLBACK
-# =========================================================
+# ============================================================
+# DOWNLOAD CALLBACK
+# ============================================================
 
-async def quality_handler(
+async def download_callback(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
@@ -1212,161 +1019,111 @@ async def quality_handler(
 
     await query.answer()
 
+    data = query.data
 
-    if query.data == "unavailable":
-
-        await query.answer(
-
-            "❌ ဒီ Quality မရနိုင်ပါ။",
-
-            show_alert=True
-
-        )
-
+    if not data.startswith(
+        "download|"
+    ):
         return
 
-
-    _, quality = query.data.split(
+    quality = data.split(
         "|",
         1
-    )
-
+    )[1]
 
     url = context.user_data.get(
         "video_url"
     )
 
-
     if not url:
 
         await query.edit_message_text(
-
-            "❌ Download session "
-            "မတွေ့တော့ပါဘူး။\n\n"
-            "Link ကို ပြန်ပို့ပါ။"
-
+            "❌ Download session မတွေ့တော့ပါဘူး။\n\n"
+            "Link ကို ပြန်ပို့ပြီး ထပ်စမ်းပါ။"
         )
 
         return
 
-
     quality_label = (
-
         "MP3"
-
         if quality == "mp3"
-
         else f"{quality}p"
-
     )
 
-
     await query.edit_message_text(
-
         f"⏳ <b>{quality_label}</b> "
         "Download လုပ်နေပါတယ်...\n\n"
 
         "📥 Server က file ပြင်ဆင်နေပါတယ်။\n"
-        "ခဏစောင့်ပေးပါ။",
+        "ခဏစောင့်ပေးပါ...",
 
         parse_mode="HTML"
-
     )
 
-
     file_path = None
-
 
     try:
 
         await context.bot.send_chat_action(
-
             chat_id=query.message.chat_id,
-
             action=(
-
                 ChatAction.UPLOAD_VIDEO
-
                 if quality != "mp3"
-
                 else ChatAction.UPLOAD_DOCUMENT
-
-            )
-
-        )
-
-
-        file_path, title = (
-            await asyncio.to_thread(
-
-                download_media_sync,
-
-                url,
-
-                quality
-
             )
         )
 
+        file_path, title = await asyncio.to_thread(
+            download_video_sync,
+            url,
+            quality
+        )
 
-        if not file_path:
-
-            raise RuntimeError(
-                "File path is empty."
-            )
-
-
-        if not os.path.exists(
-            file_path
+        if (
+            not file_path
+            or not os.path.exists(file_path)
         ):
 
             raise RuntimeError(
                 "Downloaded file not found."
             )
 
-
         file_size = os.path.getsize(
             file_path
         )
 
-
-        if (
-            file_size
-            > MAX_FILE_SIZE_BYTES
-        ):
+        if file_size > MAX_FILE_SIZE_BYTES:
 
             await query.edit_message_text(
-
                 "❌ File Size အရမ်းကြီးနေပါတယ်။\n\n"
 
                 f"📦 Size: "
                 f"{file_size / (1024 * 1024):.1f} MB\n"
 
-                f"⚠️ Bot limit: "
-                f"{MAX_FILE_SIZE_MB} MB\n\n"
+                f"⚠️ ဒီ Bot က "
+                f"{MAX_FILE_SIZE_MB} MB အထိပဲ "
+                "ပို့ပေးပါတယ်။\n\n"
 
-                "⬇️ Quality နိမ့်တာကို "
-                "ရွေးပြီး ထပ်စမ်းပါ။"
-
+                "အနိမ့် Quality တစ်ခုကို ရွေးပြီး "
+                "ထပ်စမ်းကြည့်ပါ။"
             )
 
             return
 
+        safe_title = escape(
+            str(title)[:500]
+        )
 
-        # =================================================
+        # ====================================================
         # MP3
-        # =================================================
+        # ====================================================
 
         if quality == "mp3":
 
             await context.bot.send_chat_action(
-
                 chat_id=query.message.chat_id,
-
                 action=ChatAction.UPLOAD_DOCUMENT
-
             )
-
 
             with open(
                 file_path,
@@ -1374,69 +1131,89 @@ async def quality_handler(
             ) as audio_file:
 
                 await context.bot.send_audio(
-
                     chat_id=query.message.chat_id,
-
                     audio=audio_file,
 
                     caption=(
-
-                        f"🎵 <b>{title[:500]}</b>\n\n"
+                        f"🎵 <b>{safe_title}</b>\n\n"
                         "✅ MP3 Download Complete"
-
                     ),
 
                     parse_mode="HTML",
 
-                    title=title[:100]
-
+                    title=str(title)[:100]
                 )
 
-
-        # =================================================
+        # ====================================================
         # VIDEO
-        # =================================================
+        # ====================================================
 
         else:
 
             await context.bot.send_chat_action(
-
                 chat_id=query.message.chat_id,
-
                 action=ChatAction.UPLOAD_VIDEO
-
             )
 
+            extension = (
+                Path(file_path)
+                .suffix
+                .lower()
+            )
 
-            with open(
-                file_path,
-                "rb"
-            ) as video_file:
+            if extension == ".mp4":
 
-                await context.bot.send_video(
+                with open(
+                    file_path,
+                    "rb"
+                ) as video_file:
 
-                    chat_id=query.message.chat_id,
+                    await context.bot.send_video(
+                        chat_id=(
+                            query.message.chat_id
+                        ),
+                        video=video_file,
 
-                    video=video_file,
+                        caption=(
+                            f"🎬 <b>{safe_title}</b>\n\n"
 
-                    caption=(
+                            f"📺 Quality: "
+                            f"{quality_label}\n"
 
-                        f"🎬 <b>{title[:500]}</b>\n\n"
+                            "✅ Download Complete"
+                        ),
 
-                        f"📺 Quality: "
-                        f"{quality_label}\n"
+                        parse_mode="HTML",
 
-                        "✅ Download Complete"
+                        supports_streaming=True
+                    )
 
-                    ),
+            else:
 
-                    parse_mode="HTML",
+                with open(
+                    file_path,
+                    "rb"
+                ) as document_file:
 
-                    supports_streaming=True
+                    await context.bot.send_document(
+                        chat_id=(
+                            query.message.chat_id
+                        ),
+                        document=document_file,
 
-                )
+                        caption=(
+                            f"🎬 <b>{safe_title}</b>\n\n"
 
+                            f"📺 Quality: "
+                            f"{quality_label}\n"
 
+                            "✅ Download Complete"
+                        ),
+
+                        parse_mode="HTML"
+                    )
+
+        # Remove old message
         try:
 
             await query.message.delete()
@@ -1445,85 +1222,85 @@ async def quality_handler(
 
             pass
 
+    except yt_dlp.utils.DownloadError as error:
 
-    except yt_dlp.utils.DownloadError as e:
-
-        error_text = str(e)
-
+        error_text = str(error)
 
         logger.error(
-            "Download failed: %s",
+            "Download failed:\n%s",
             error_text,
             exc_info=True
         )
 
-
         if (
             "Sign in to confirm" in error_text
             or "not a bot" in error_text
-            or "confirm you're not a bot" in error_text
+            or "confirm you're not a bot"
+            in error_text
         ):
 
             await query.edit_message_text(
-
                 "❌ <b>YouTube Verification Error</b>\n\n"
 
-                "YouTube က server request ကို "
+                "YouTube က ဒီ server ကို "
                 "bot traffic လို့ သတ်မှတ်ထားပါတယ်။\n\n"
 
-                "🔐 Render Secret File မှာ "
-                "<b>cookies.txt</b> ထည့်ထားပြီး "
-                "Deploy ပြန်လုပ်ပါ။",
+                "🔐 Valid YouTube cookies ကို "
+                "Render Secret File အဖြစ် "
+                "ထည့်ထားရပါမယ်။",
 
                 parse_mode="HTML"
-
             )
 
         else:
 
             await query.edit_message_text(
-
                 "❌ Download မအောင်မြင်ပါဘူး။\n\n"
 
                 "အခြား Quality တစ်ခုကို ရွေးပြီး "
                 "ထပ်စမ်းကြည့်ပါ။"
-
             )
 
+    except Exception as error:
 
-    except Exception as e:
-
-        error_text = str(e)
-
+        error_text = str(error)
 
         logger.error(
             "Download error: %s",
-            error_text,
+            error,
             exc_info=True
         )
-
 
         if error_text.startswith(
             "FILE_TOO_LARGE:"
         ):
 
+            size = error_text.split(
+                ":",
+                1
+            )[1]
+
             await query.edit_message_text(
-
                 "❌ File Size အရမ်းကြီးနေပါတယ်။\n\n"
-                "Quality နိမ့်တာကို "
-                "ရွေးပြီး ထပ်စမ်းကြည့်ပါ။"
 
+                f"📦 Size: {size} MB\n"
+
+                f"⚠️ Telegram upload limit အတွက် "
+                f"{MAX_FILE_SIZE_MB} MB အောက်ပဲ "
+                "ပို့ပေးနိုင်ပါတယ်။\n\n"
+
+                "အနိမ့် Quality တစ်ခုကို "
+                "ရွေးပြီး ထပ်စမ်းကြည့်ပါ။"
             )
 
         else:
 
             await query.edit_message_text(
-
                 "❌ Download မအောင်မြင်ပါဘူး။\n\n"
-                "ခဏနေပြီး ပြန်စမ်းကြည့်ပါ။"
 
+                "အနိမ့် Quality တစ်ခုကို ရွေးပြီး "
+                "ထပ်စမ်းကြည့်ပါ။"
             )
-
 
     finally:
 
@@ -1535,28 +1312,24 @@ async def quality_handler(
                     file_path
                 ).parent
 
-
                 if parent.exists():
 
                     shutil.rmtree(
-
                         parent,
-
                         ignore_errors=True
-
                     )
 
-            except Exception as e:
+            except Exception as cleanup_error:
 
                 logger.warning(
-                    "Cleanup failed: %s",
-                    e
+                    "Cleanup error: %s",
+                    cleanup_error
                 )
 
 
-# =========================================================
+# ============================================================
 # ERROR HANDLER
-# =========================================================
+# ============================================================
 
 async def error_handler(
     update: object,
@@ -1569,122 +1342,100 @@ async def error_handler(
     )
 
 
-# =========================================================
+# ============================================================
 # MAIN
-# =========================================================
+# ============================================================
 
 def main():
+
+    logger.info(
+        "======================================"
+    )
 
     logger.info(
         "Starting MM Video Downloader Bot..."
     )
 
+    logger.info(
+        "yt-dlp version: %s",
+        yt_dlp.version.__version__
+    )
 
     logger.info(
         "YouTube cookies path: %s",
         YOUTUBE_COOKIES_FILE
     )
 
-
-    cookie_file = get_cookie_file()
-
-
-    if cookie_file:
-
-        logger.info(
-            "YouTube cookies: ENABLED"
-        )
-
-    else:
-
-        logger.warning(
-            "YouTube cookies: NOT FOUND"
-        )
-
-
-    app = (
-
-        Application.builder()
-
-        .token(BOT_TOKEN)
-
-        .build()
-
+    logger.info(
+        "YouTube cookies available: %s",
+        bool(get_cookie_file())
     )
 
+    logger.info(
+        "Deno JS runtime enabled."
+    )
 
-    app.add_handler(
+    logger.info(
+        "======================================"
+    )
 
+    application = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .build()
+    )
+
+    # /start
+    application.add_handler(
         CommandHandler(
             "start",
             start
         )
-
     )
 
-
-    app.add_handler(
-
+    # Download buttons
+    application.add_handler(
         CallbackQueryHandler(
-
-            button_handler,
-
-            pattern=r"^(download|help|about)$"
-
+            download_callback,
+            pattern=r"^download\|"
         )
-
     )
 
-
-    app.add_handler(
-
+    # Developer
+    application.add_handler(
         CallbackQueryHandler(
-
-            quality_handler,
-
-            pattern=r"^(quality\||unavailable)"
-
+            contact_developer,
+            pattern=r"^developer$"
         )
-
     )
 
-
-    app.add_handler(
-
+    # URLs
+    application.add_handler(
         MessageHandler(
-
             filters.TEXT
             & ~filters.COMMAND,
-
             handle_url
-
         )
-
     )
 
-
-    app.add_error_handler(
+    # Errors
+    application.add_error_handler(
         error_handler
     )
-
 
     logger.info(
         "Bot is starting with polling..."
     )
 
-
-    app.run_polling(
-
+    application.run_polling(
         drop_pending_updates=True,
-
         allowed_updates=Update.ALL_TYPES
-
     )
 
 
-# =========================================================
+# ============================================================
 # ENTRY POINT
-# =========================================================
+# ============================================================
 
 if __name__ == "__main__":
 
