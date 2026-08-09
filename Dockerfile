@@ -2,6 +2,7 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+
 # =========================================================
 # System dependencies
 # =========================================================
@@ -23,6 +24,13 @@ RUN curl -fsSL https://deno.land/install.sh | sh
 
 ENV DENO_INSTALL=/root/.deno
 ENV PATH="${DENO_INSTALL}/bin:${PATH}"
+
+
+# =========================================================
+# Verify Deno installation
+# =========================================================
+
+RUN deno --version
 
 
 # =========================================================
