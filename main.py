@@ -2,7 +2,9 @@ import os
 import re
 import asyncio
 import logging
+import threading
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import yt_dlp
 from dotenv import load_dotenv
@@ -56,23 +58,86 @@ logger = logging.getLogger(__name__)
 
 
 # =========================================================
+# RENDER HEALTH SERVER
+# =========================================================
+
+class HealthHandler(BaseHTTPRequestHandler):
+
+    def do_GET(self):
+
+        if self.path in ["/", "/health"]:
+
+            response = (
+                "MM Video Downloader Bot is running."
+            ).encode("utf-8")
+
+            self.send_response(200)
+
+            self.send_header(
+                "Content-Type",
+                "text/plain; charset=utf-8"
+            )
+
+            self.send_header(
+                "Content-Length",
+                str(len(response))
+            )
+
+            self.end_headers()
+
+            self.wfile.write(response)
+
+        else:
+
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        return
+
+
+def start_health_server():
+
+    port = int(
+        os.environ.get(
+            "PORT",
+            "10000"
+        )
+    )
+
+    server = HTTPServer(
+        ("0.0.0.0", port),
+        HealthHandler,
+    )
+
+    logger.info(
+        f"Health server listening on 0.0.0.0:{port}"
+    )
+
+    server.serve_forever()
+
+
+# =========================================================
 # SUPPORTED URL
 # =========================================================
 
 YOUTUBE_REGEX = re.compile(
-    r"https?://(www\.)?"
+    r"^https?://"
+    r"(www\.)?"
     r"(youtube\.com|youtu\.be)/.+",
     re.IGNORECASE,
 )
 
 TIKTOK_REGEX = re.compile(
-    r"https?://(www\.)?"
-    r"tiktok\.com/.+",
+    r"^https?://"
+    r"(www\.)?"
+    r"(tiktok\.com|vm\.tiktok\.com|vt\.tiktok\.com)/.+",
     re.IGNORECASE,
 )
 
 
 def is_supported_url(url: str) -> bool:
+
     return bool(
         YOUTUBE_REGEX.match(url)
         or TIKTOK_REGEX.match(url)
@@ -99,6 +164,7 @@ def main_menu():
                 "❓ Help",
                 callback_data="help"
             ),
+
             InlineKeyboardButton(
                 "ℹ️ About",
                 callback_data="about"
@@ -111,7 +177,6 @@ def main_menu():
                 url="https://t.me/superraizo7"
             )
         ],
-
     ]
 
     return InlineKeyboardMarkup(keyboard)
@@ -213,6 +278,7 @@ def get_video_info(url: str):
 
         "noplaylist": True,
 
+        "extract_flat": False,
     }
 
     with yt_dlp.YoutubeDL(options) as ydl:
@@ -240,9 +306,7 @@ def detect_available_qualities(info):
 
         height = fmt.get("height")
 
-        video_codec = fmt.get(
-            "vcodec"
-        )
+        video_codec = fmt.get("vcodec")
 
         if (
             height
@@ -266,11 +330,11 @@ def detect_available_qualities(info):
 
     for quality in target_qualities:
 
+        # We only claim a quality is available
+        # if yt-dlp has a video format at
+        # exactly that resolution or close enough below it.
         available[quality] = (
-            any(
-                height >= quality
-                for height in available_heights
-            )
+            quality in available_heights
         )
 
     return available
@@ -331,6 +395,7 @@ def quality_keyboard(
             row = []
 
     if row:
+
         keyboard.append(row)
 
     keyboard.append(
@@ -464,7 +529,7 @@ async def handle_url(
             ),
         )
 
-    except Exception as e:
+    except Exception:
 
         logger.exception(
             "Information extraction failed"
@@ -516,7 +581,13 @@ def download_video(
 
         "noplaylist": True,
 
+        # Prefer exact requested resolution.
+        # Fall back to the best available format
+        # not exceeding requested height.
         "format":
+            f"bestvideo[height={height}]"
+            f"+bestaudio/"
+            f"best[height={height}]/"
             f"bestvideo[height<={height}]"
             f"+bestaudio/"
             f"best[height<={height}]",
@@ -543,17 +614,27 @@ def download_video(
             info
         )
 
-        mp4_file = Path(
-            filename
-        ).with_suffix(".mp4")
+        possible_files = [
 
-        if mp4_file.exists():
+            Path(filename),
 
-            return str(
-                mp4_file
-            )
+            Path(filename).with_suffix(".mp4"),
 
-        return filename
+            Path(filename).with_suffix(".mkv"),
+
+            Path(filename).with_suffix(".webm"),
+
+        ]
+
+        for path in possible_files:
+
+            if path.exists():
+
+                return str(path)
+
+        raise FileNotFoundError(
+            "Downloaded video file not found"
+        )
 
 
 # =========================================================
@@ -626,13 +707,15 @@ def download_mp3(
 
         mp3_file = Path(
             filename
-        ).with_suffix(
-            ".mp3"
-        )
+        ).with_suffix(".mp3")
 
-        return str(
-            mp3_file
-        )
+        if not mp3_file.exists():
+
+            raise FileNotFoundError(
+                "MP3 file not found"
+            )
+
+        return str(mp3_file)
 
 
 # =========================================================
@@ -750,7 +833,7 @@ async def quality_handler(
                 supports_streaming=True,
             )
 
-    except Exception as e:
+    except Exception:
 
         logger.exception(
             "Download failed"
@@ -758,11 +841,14 @@ async def quality_handler(
 
         await query.message.reply_text(
             "❌ <b>Download မအောင်မြင်ပါ။</b>\n\n"
+
             "ဖြစ်နိုင်သောအကြောင်းရင်းများ:\n"
             "• Video unavailable\n"
             "• Server error\n"
             "• File size ကြီးလွန်းခြင်း\n"
-            "• Format error\n\n"
+            "• Format error\n"
+            "• Source က requested quality မပေးခြင်း\n\n"
+
             "နောက်တစ်ကြိမ် ပြန်ကြိုးစားပါ။",
             parse_mode="HTML",
         )
@@ -797,7 +883,7 @@ async def error_handler(
     context: ContextTypes.DEFAULT_TYPE,
 ):
 
-    logger.exception(
+    logger.error(
         "Unhandled exception",
         exc_info=context.error,
     )
@@ -813,6 +899,15 @@ def main():
         "🤖 MM Video Downloader Bot Started"
     )
 
+    # Start Render HTTP health server
+    health_thread = threading.Thread(
+        target=start_health_server,
+        daemon=True,
+    )
+
+    health_thread.start()
+
+    # Start Telegram Bot
     app = (
         Application.builder()
         .token(BOT_TOKEN)
@@ -836,7 +931,7 @@ def main():
     app.add_handler(
         CallbackQueryHandler(
             quality_handler,
-            pattern=r"^quality\|",
+            pattern=r"^(quality\||unavailable)",
         )
     )
 
