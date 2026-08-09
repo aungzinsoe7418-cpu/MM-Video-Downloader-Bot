@@ -55,6 +55,8 @@ BOT_TOKEN = os.getenv(
 # DEVELOPER
 # ============================================================
 
+# Default developer account.
+# Render Environment Variable can override this if needed.
 DEVELOPER_USERNAME = os.getenv(
     "DEVELOPER_USERNAME",
     "superraizo7"
@@ -105,8 +107,6 @@ MAX_FILE_SIZE_BYTES = (
 # ============================================================
 # DOWNLOAD STORAGE SETTINGS
 #
-# Auto cleanup:
-#
 # 1. Successful downloads are deleted immediately.
 # 2. Failed/incomplete files are deleted automatically.
 # 3. Files older than 30 minutes are removed.
@@ -148,8 +148,6 @@ MAX_DOWNLOAD_STORAGE_BYTES = (
 #
 # Render Free filesystem is ephemeral.
 # Statistics can reset after restart/redeploy.
-#
-# This database is very small.
 # ============================================================
 
 DATABASE_DIR = Path(
@@ -264,7 +262,6 @@ def init_database():
                 """
             )
 
-
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS downloads (
@@ -277,7 +274,6 @@ def init_database():
                 """
             )
 
-
             connection.commit()
 
         finally:
@@ -289,9 +285,7 @@ def init_database():
 # REGISTER USER
 # ============================================================
 
-def register_user_sync(
-    user
-):
+def register_user_sync(user):
 
     if not user:
         return
@@ -318,7 +312,6 @@ def register_user_sync(
     now = time.strftime(
         "%Y-%m-%d %H:%M:%S"
     )
-
 
     with DB_LOCK:
 
@@ -378,7 +371,6 @@ def register_download_sync(
         "%Y-%m-%d %H:%M:%S"
     )
 
-
     with DB_LOCK:
 
         connection = sqlite3.connect(
@@ -422,7 +414,6 @@ def get_statistics_sync():
         "%Y-%m-%d"
     )
 
-
     with DB_LOCK:
 
         connection = sqlite3.connect(
@@ -432,9 +423,6 @@ def get_statistics_sync():
         try:
 
             cursor = connection.cursor()
-
-
-            # Total users
 
             cursor.execute(
                 """
@@ -446,9 +434,6 @@ def get_statistics_sync():
             total_users = (
                 cursor.fetchone()[0]
             )
-
-
-            # Today active users
 
             cursor.execute(
                 """
@@ -465,9 +450,6 @@ def get_statistics_sync():
                 cursor.fetchone()[0]
             )
 
-
-            # Total downloads
-
             cursor.execute(
                 """
                 SELECT COUNT(*)
@@ -478,9 +460,6 @@ def get_statistics_sync():
             total_downloads = (
                 cursor.fetchone()[0]
             )
-
-
-            # Today downloads
 
             cursor.execute(
                 """
@@ -497,9 +476,6 @@ def get_statistics_sync():
                 cursor.fetchone()[0]
             )
 
-
-            # YouTube
-
             cursor.execute(
                 """
                 SELECT COUNT(*)
@@ -512,9 +488,6 @@ def get_statistics_sync():
                 cursor.fetchone()[0]
             )
 
-
-            # TikTok
-
             cursor.execute(
                 """
                 SELECT COUNT(*)
@@ -526,9 +499,6 @@ def get_statistics_sync():
             tiktok_downloads = (
                 cursor.fetchone()[0]
             )
-
-
-            # Quality statistics
 
             cursor.execute(
                 """
@@ -543,30 +513,15 @@ def get_statistics_sync():
                 cursor.fetchall()
             )
 
-
             return {
-                "total_users":
-                    total_users,
-
-                "today_users":
-                    today_users,
-
-                "total_downloads":
-                    total_downloads,
-
-                "today_downloads":
-                    today_downloads,
-
-                "youtube":
-                    youtube_downloads,
-
-                "tiktok":
-                    tiktok_downloads,
-
-                "quality":
-                    quality_rows,
+                "total_users": total_users,
+                "today_users": today_users,
+                "total_downloads": total_downloads,
+                "today_downloads": today_downloads,
+                "youtube": youtube_downloads,
+                "tiktok": tiktok_downloads,
+                "quality": quality_rows,
             }
-
 
         finally:
 
@@ -580,7 +535,6 @@ def get_statistics_sync():
 def get_download_storage_bytes():
 
     total_size = 0
-
 
     try:
 
@@ -601,14 +555,12 @@ def get_download_storage_bytes():
 
                 pass
 
-
     except Exception as error:
 
         logger.warning(
             "Storage size check failed: %s",
             error
         )
-
 
     return total_size
 
@@ -621,7 +573,6 @@ def cleanup_downloads():
 
     now = time.time()
 
-
     try:
 
         DOWNLOAD_DIR.mkdir(
@@ -629,12 +580,7 @@ def cleanup_downloads():
             exist_ok=True
         )
 
-
-        # ====================================================
-        # STEP 1
-        # Remove files older than 30 minutes
-        # ====================================================
-
+        # Remove files older than 30 minutes.
         for path in list(
             DOWNLOAD_DIR.rglob("*")
         ):
@@ -644,12 +590,10 @@ def cleanup_downloads():
                 if not path.is_file():
                     continue
 
-
                 age = (
                     now
                     - path.stat().st_mtime
                 )
-
 
                 if age > FILE_MAX_AGE_SECONDS:
 
@@ -672,7 +616,6 @@ def cleanup_downloads():
                             error
                         )
 
-
             except (
                 FileNotFoundError,
                 PermissionError
@@ -680,12 +623,7 @@ def cleanup_downloads():
 
                 continue
 
-
-        # ====================================================
-        # STEP 2
-        # Remove empty directories
-        # ====================================================
-
+        # Remove empty directories.
         directories = sorted(
             [
                 p
@@ -695,7 +633,6 @@ def cleanup_downloads():
             key=lambda p: len(p.parts),
             reverse=True
         )
-
 
         for directory in directories:
 
@@ -714,23 +651,16 @@ def cleanup_downloads():
 
                 pass
 
-
-        # ====================================================
-        # STEP 3
-        # Storage limit protection
-        # ====================================================
-
+        # Storage limit protection.
         total_size = (
             get_download_storage_bytes()
         )
-
 
         if total_size <= (
             MAX_DOWNLOAD_STORAGE_BYTES
         ):
 
             return
-
 
         logger.warning(
             "Download storage exceeded: %.2f MB",
@@ -739,9 +669,7 @@ def cleanup_downloads():
             )
         )
 
-
         files = []
-
 
         for path in DOWNLOAD_DIR.rglob("*"):
 
@@ -764,11 +692,9 @@ def cleanup_downloads():
 
                 pass
 
-
         files.sort(
             key=lambda item: item[0]
         )
-
 
         for (
             modified_time,
@@ -782,22 +708,18 @@ def cleanup_downloads():
 
                 break
 
-
             try:
 
                 path.unlink(
                     missing_ok=True
                 )
 
-
                 total_size -= file_size
-
 
                 logger.info(
                     "Storage cleanup removed: %s",
                     path
                 )
-
 
             except Exception as error:
 
@@ -805,11 +727,6 @@ def cleanup_downloads():
                     "Storage cleanup failed: %s",
                     error
                 )
-
-
-        # ====================================================
-        # Remove empty directories again
-        # ====================================================
 
         directories = sorted(
             [
@@ -820,7 +737,6 @@ def cleanup_downloads():
             key=lambda p: len(p.parts),
             reverse=True
         )
-
 
         for directory in directories:
 
@@ -838,7 +754,6 @@ def cleanup_downloads():
             ):
 
                 pass
-
 
     except Exception as error:
 
@@ -859,7 +774,6 @@ def cleanup_loop():
         "Auto cleanup service started."
     )
 
-
     while True:
 
         try:
@@ -874,7 +788,6 @@ def cleanup_loop():
                 exc_info=True
             )
 
-
         time.sleep(
             AUTO_CLEANUP_INTERVAL_SECONDS
         )
@@ -884,9 +797,7 @@ def cleanup_loop():
 # URL HELPERS
 # ============================================================
 
-def get_platform(
-    url: str
-):
+def get_platform(url: str):
 
     try:
 
@@ -900,9 +811,7 @@ def get_platform(
 
         return None
 
-
     host = host.split(":")[0]
-
 
     if (
         host in YOUTUBE_HOSTS
@@ -913,7 +822,6 @@ def get_platform(
 
         return "youtube"
 
-
     if (
         host in TIKTOK_HOSTS
         or host.endswith(
@@ -923,13 +831,10 @@ def get_platform(
 
         return "tiktok"
 
-
     return None
 
 
-def is_supported_url(
-    url: str
-):
+def is_supported_url(url: str):
 
     return (
         get_platform(url)
@@ -941,9 +846,7 @@ def is_supported_url(
 # FILENAME
 # ============================================================
 
-def clean_filename(
-    name: str
-):
+def clean_filename(name: str):
 
     name = re.sub(
         r'[\\/*?:"<>|]',
@@ -951,18 +854,15 @@ def clean_filename(
         name
     )
 
-
     name = re.sub(
         r"\s+",
         " ",
         name
     ).strip()
 
-
     if not name:
 
         name = "video"
-
 
     return name[:150]
 
@@ -975,7 +875,6 @@ def get_cookie_file():
 
     source_candidates = []
 
-
     if YOUTUBE_COOKIES_FILE:
 
         source_candidates.append(
@@ -984,24 +883,20 @@ def get_cookie_file():
             )
         )
 
-
     source_candidates.extend(
         [
             Path(
                 "/etc/secrets/cookies.txt"
             ),
-
             Path(
                 "cookies.txt"
             ),
         ]
     )
 
-
     checked = set()
 
     source_file = None
-
 
     for path in source_candidates:
 
@@ -1013,14 +908,11 @@ def get_cookie_file():
 
             continue
 
-
         if path in checked:
 
             continue
 
-
         checked.add(path)
-
 
         try:
 
@@ -1034,14 +926,12 @@ def get_cookie_file():
 
                 break
 
-
         except Exception as error:
 
             logger.warning(
                 "Cookie check error: %s",
                 error
             )
-
 
     if not source_file:
 
@@ -1050,11 +940,6 @@ def get_cookie_file():
         )
 
         return None
-
-
-    # ========================================================
-    # Existing runtime cookie
-    # ========================================================
 
     try:
 
@@ -1068,15 +953,9 @@ def get_cookie_file():
                 RUNTIME_COOKIE_FILE
             )
 
-
     except Exception:
 
         pass
-
-
-    # ========================================================
-    # Copy Secret File -> writable /tmp
-    # ========================================================
 
     try:
 
@@ -1084,7 +963,6 @@ def get_cookie_file():
             source_file,
             RUNTIME_COOKIE_FILE
         )
-
 
         try:
 
@@ -1097,17 +975,14 @@ def get_cookie_file():
 
             pass
 
-
         logger.info(
             "YouTube cookies copied to writable file: %s",
             RUNTIME_COOKIE_FILE
         )
 
-
         return str(
             RUNTIME_COOKIE_FILE
         )
-
 
     except Exception as error:
 
@@ -1127,30 +1002,17 @@ def get_cookie_file():
 def base_ydl_options():
 
     return {
-
         "quiet": True,
-
         "no_warnings": True,
-
         "noprogress": True,
-
         "socket_timeout": 30,
-
         "retries": 3,
-
         "fragment_retries": 3,
-
-        "http_chunk_size":
-            10 * 1024 * 1024,
-
+        "http_chunk_size": 10 * 1024 * 1024,
         "noplaylist": True,
-
         "continuedl": True,
-
         "overwrites": True,
-
-        "ignore_no_formats_error":
-            True,
+        "ignore_no_formats_error": True,
     }
 
 
@@ -1158,19 +1020,15 @@ def base_ydl_options():
 # YOUTUBE OPTIONS
 # ============================================================
 
-def youtube_ydl_options(
-    download=False
-):
+def youtube_ydl_options(download=False):
 
     options = (
         base_ydl_options()
     )
 
-
     cookie_file = (
         get_cookie_file()
     )
-
 
     if cookie_file:
 
@@ -1178,19 +1036,16 @@ def youtube_ydl_options(
             "cookiefile"
         ] = cookie_file
 
-
         logger.info(
             "YouTube cookies enabled: %s",
             cookie_file
         )
-
 
     else:
 
         logger.warning(
             "YouTube cookies unavailable."
         )
-
 
     if YOUTUBE_USER_AGENT:
 
@@ -1201,7 +1056,6 @@ def youtube_ydl_options(
                 YOUTUBE_USER_AGENT
         }
 
-
     if download:
 
         options[
@@ -1211,7 +1065,6 @@ def youtube_ydl_options(
         options[
             "overwrites"
         ] = True
-
 
     return options
 
@@ -1220,14 +1073,11 @@ def youtube_ydl_options(
 # TIKTOK OPTIONS
 # ============================================================
 
-def tiktok_ydl_options(
-    download=False
-):
+def tiktok_ydl_options(download=False):
 
     options = (
         base_ydl_options()
     )
-
 
     if download:
 
@@ -1239,7 +1089,6 @@ def tiktok_ydl_options(
             "overwrites"
         ] = True
 
-
     return options
 
 
@@ -1247,14 +1096,11 @@ def tiktok_ydl_options(
 # VIDEO INFO
 # ============================================================
 
-def get_video_info_sync(
-    url: str
-):
+def get_video_info_sync(url: str):
 
     platform = (
         get_platform(url)
     )
-
 
     if platform == "youtube":
 
@@ -1264,7 +1110,6 @@ def get_video_info_sync(
             )
         )
 
-
     elif platform == "tiktok":
 
         options = (
@@ -1273,13 +1118,11 @@ def get_video_info_sync(
             )
         )
 
-
     else:
 
         raise ValueError(
             "Unsupported URL"
         )
-
 
     with yt_dlp.YoutubeDL(
         options
@@ -1304,7 +1147,6 @@ def download_video_sync(
         get_platform(url)
     )
 
-
     if platform == "youtube":
 
         options = (
@@ -1312,7 +1154,6 @@ def download_video_sync(
                 download=True
             )
         )
-
 
     elif platform == "tiktok":
 
@@ -1322,13 +1163,11 @@ def download_video_sync(
             )
         )
 
-
     else:
 
         raise ValueError(
             "Unsupported URL"
         )
-
 
     unique_dir = tempfile.mkdtemp(
         prefix="mm_video_",
@@ -1337,53 +1176,37 @@ def download_video_sync(
         )
     )
 
-
     output_template = os.path.join(
         unique_dir,
         "%(title).150s.%(ext)s"
     )
 
-
-    # ========================================================
     # MP3
-    # ========================================================
-
     if quality == "mp3":
 
         options.update(
             {
-
-                "format":
-                    (
-                        "bestaudio[ext=m4a]"
-                        "/bestaudio"
-                        "/best"
-                    ),
-
+                "format": (
+                    "bestaudio[ext=m4a]"
+                    "/bestaudio"
+                    "/best"
+                ),
                 "outtmpl":
                     output_template,
-
-                "postprocessors":
-                    [
-                        {
-                            "key":
-                                "FFmpegExtractAudio",
-
-                            "preferredcodec":
-                                "mp3",
-
-                            "preferredquality":
-                                "192",
-                        }
-                    ],
+                "postprocessors": [
+                    {
+                        "key":
+                            "FFmpegExtractAudio",
+                        "preferredcodec":
+                            "mp3",
+                        "preferredquality":
+                            "192",
+                    }
+                ],
             }
         )
 
-
-    # ========================================================
     # VIDEO
-    # ========================================================
-
     else:
 
         try:
@@ -1399,51 +1222,35 @@ def download_video_sync(
                 ignore_errors=True
             )
 
-
             raise ValueError(
                 "Invalid video quality."
             )
 
-
         format_string = (
-
             f"bestvideo"
             f"[height<={height}]"
             f"+bestaudio/"
             f"best"
-            f"[height<={height}]/"
-            f"best"
-
+            f"[height<={height}]"
+            f"/best"
         )
-
 
         options.update(
             {
-
                 "format":
                     format_string,
-
                 "outtmpl":
                     output_template,
-
                 "merge_output_format":
                     "mp4",
-
-                "postprocessor_args":
-                    {
-                        "Merger":
-                            [
-                                "-movflags",
-                                "+faststart"
-                            ]
-                    },
+                "postprocessor_args": {
+                    "Merger": [
+                        "-movflags",
+                        "+faststart"
+                    ]
+                },
             }
         )
-
-
-    # ========================================================
-    # DOWNLOAD
-    # ========================================================
 
     try:
 
@@ -1456,7 +1263,6 @@ def download_video_sync(
                 download=True
             )
 
-
             requested_title = (
                 clean_filename(
                     info.get(
@@ -1466,15 +1272,11 @@ def download_video_sync(
                 )
             )
 
-
         files = [
-
             f
-
             for f in Path(
                 unique_dir
             ).glob("*")
-
             if (
                 f.is_file()
                 and f.suffix.lower()
@@ -1485,7 +1287,6 @@ def download_video_sync(
             )
         ]
 
-
         if not files:
 
             raise RuntimeError(
@@ -1493,13 +1294,9 @@ def download_video_sync(
                 "output file was not found."
             )
 
-
         preferred = [
-
             f
-
             for f in files
-
             if f.suffix.lower()
             in {
                 ".mp4",
@@ -1509,7 +1306,6 @@ def download_video_sync(
                 ".mkv",
             }
         ]
-
 
         if preferred:
 
@@ -1527,18 +1323,15 @@ def download_video_sync(
                     p.stat().st_size
             )
 
-
         if not file_path.exists():
 
             raise RuntimeError(
                 "Downloaded file does not exist."
             )
 
-
         file_size = (
             file_path.stat().st_size
         )
-
 
         logger.info(
             "Downloaded: %s | %.2f MB",
@@ -1547,7 +1340,6 @@ def download_video_sync(
                 1024 * 1024
             )
         )
-
 
         if file_size > (
             MAX_FILE_SIZE_BYTES
@@ -1558,12 +1350,10 @@ def download_video_sync(
                 f"{file_size / (1024 * 1024):.1f}"
             )
 
-
         return (
             str(file_path),
             requested_title
         )
-
 
     except Exception:
 
@@ -1584,7 +1374,7 @@ def developer_button():
     return InlineKeyboardButton(
         "👨‍💻 Contact Developer",
         url=(
-            f"https://t.me/"
+            "https://t.me/"
             f"{DEVELOPER_USERNAME}"
         )
     )
@@ -1597,13 +1387,10 @@ def developer_button():
 def build_start_keyboard():
 
     keyboard = [
-
         [
             developer_button()
         ]
-
     ]
-
 
     return InlineKeyboardMarkup(
         keyboard
@@ -1622,41 +1409,29 @@ async def start(
     if not update.message:
         return
 
-
     await asyncio.to_thread(
         register_user_sync,
         update.effective_user
     )
 
-
     text = (
-
         "👋 မင်္ဂလာပါ!\n\n"
-
         "🎬 YouTube / TikTok "
         "Video Downloader Bot ဖြစ်ပါတယ်။\n\n"
-
         "🔗 YouTube သို့မဟုတ် TikTok "
         "Video Link ပို့ပါ။\n\n"
-
         "📥 ရနိုင်သော Quality များ\n\n"
-
         "• 240p\n"
         "• 360p\n"
         "• 480p\n"
         "• 720p\n"
         "• 1080p\n"
         "• 🎵 MP3\n\n"
-
         "👇 Video Link ပို့လိုက်ပါ။"
-
     )
 
-
     await update.message.reply_text(
-
         text,
-
         reply_markup=(
             build_start_keyboard()
         )
@@ -1675,45 +1450,33 @@ async def stats(
     if not update.message:
         return
 
-
     user = (
         update.effective_user
     )
-
 
     await asyncio.to_thread(
         register_user_sync,
         user
     )
 
-
     username = (
         user.username
         or ""
     ).lower()
-
 
     developer_username = (
         DEVELOPER_USERNAME
         or ""
     ).lower()
 
-
-    # ========================================================
-    # Developer only
-    # ========================================================
-
     if username != developer_username:
 
         await update.message.reply_text(
-
             "❌ ဒီ command ကို "
             "Developer သာ အသုံးပြုနိုင်ပါတယ်။"
-
         )
 
         return
-
 
     statistics = (
         await asyncio.to_thread(
@@ -1721,13 +1484,11 @@ async def stats(
         )
     )
 
-
     total_users = (
         statistics[
             "total_users"
         ]
     )
-
 
     today_users = (
         statistics[
@@ -1735,13 +1496,11 @@ async def stats(
         ]
     )
 
-
     total_downloads = (
         statistics[
             "total_downloads"
         ]
     )
-
 
     today_downloads = (
         statistics[
@@ -1749,13 +1508,11 @@ async def stats(
         ]
     )
 
-
     youtube_downloads = (
         statistics[
             "youtube"
         ]
     )
-
 
     tiktok_downloads = (
         statistics[
@@ -1763,39 +1520,28 @@ async def stats(
         ]
     )
 
-
     quality_rows = (
         statistics[
             "quality"
         ]
     )
 
-
     quality_text = ""
 
-
     quality_names = {
-
         "mp3":
             "🎵 MP3",
-
         "240":
             "240p",
-
         "360":
             "360p",
-
         "480":
             "480p",
-
         "720":
             "720p",
-
         "1080":
             "1080p",
-
     }
-
 
     for quality, count in quality_rows:
 
@@ -1806,12 +1552,10 @@ async def stats(
             )
         )
 
-
         quality_text += (
             f"• {label}: "
             f"{count}\n"
         )
-
 
     if not quality_text:
 
@@ -1819,77 +1563,51 @@ async def stats(
             "• No downloads yet\n"
         )
 
-
     storage_bytes = (
         get_download_storage_bytes()
     )
-
 
     storage_mb = (
         storage_bytes
         / (1024 * 1024)
     )
 
-
     text = (
-
         "📊 <b>MM Video Downloader "
         "Statistics</b>\n\n"
-
         "👥 <b>Users</b>\n"
-
         f"• Total Users: "
         f"<b>{total_users}</b>\n"
-
         f"• Active Today: "
         f"<b>{today_users}</b>\n\n"
-
         "📥 <b>Downloads</b>\n"
-
         f"• Total Downloads: "
         f"<b>{total_downloads}</b>\n"
-
         f"• Today Downloads: "
         f"<b>{today_downloads}</b>\n\n"
-
         "🌐 <b>Platform</b>\n"
-
         f"• YouTube: "
         f"<b>{youtube_downloads}</b>\n"
-
         f"• TikTok: "
         f"<b>{tiktok_downloads}</b>\n\n"
-
         "🎬 <b>Quality</b>\n"
-
         f"{quality_text}\n"
-
         "💾 <b>Temporary Storage</b>\n"
-
         f"• Current: "
         f"<b>{storage_mb:.2f} MB</b>\n"
-
         f"• Limit: "
         f"<b>{MAX_DOWNLOAD_STORAGE_MB} MB</b>\n\n"
-
         "🧹 Auto Cleanup: "
         "<b>ON</b>\n"
-
         "⏱ Cleanup Interval: "
         "<b>10 minutes</b>\n"
-
         "🗑 File Max Age: "
         "<b>30 minutes</b>"
-
     )
 
-
     await update.message.reply_text(
-
         text,
-
         parse_mode="HTML"
-
     )
 
 
@@ -1906,36 +1624,25 @@ async def contact_developer(
         update.callback_query
     )
 
-
     if not query:
         return
 
-
     await query.answer()
 
-
     text = (
-
         "👨‍💻 <b>Developer</b>\n\n"
-
         "Telegram: "
         f"@{DEVELOPER_USERNAME}\n\n"
-
         "Bot Development / Custom Bot "
         "အတွက် Developer ကို "
         "တိုက်ရိုက်ဆက်သွယ်နိုင်ပါတယ်။"
-
     )
 
-
     keyboard = [
-
         [
             developer_button()
         ]
-
     ]
-
 
     if (
         query.message
@@ -1945,18 +1652,14 @@ async def contact_developer(
         try:
 
             await query.edit_message_caption(
-
                 caption=text,
-
                 parse_mode="HTML",
-
                 reply_markup=(
                     InlineKeyboardMarkup(
                         keyboard
                     )
                 )
             )
-
 
         except Exception as error:
 
@@ -1965,24 +1668,19 @@ async def contact_developer(
                 error
             )
 
-
     else:
 
         try:
 
             await query.edit_message_text(
-
                 text=text,
-
                 parse_mode="HTML",
-
                 reply_markup=(
                     InlineKeyboardMarkup(
                         keyboard
                     )
                 )
             )
-
 
         except Exception as error:
 
@@ -1999,65 +1697,43 @@ async def contact_developer(
 def build_quality_keyboard():
 
     keyboard = [
-
         [
-
             InlineKeyboardButton(
                 "240p",
                 callback_data="download|240"
             ),
-
             InlineKeyboardButton(
                 "360p",
                 callback_data="download|360"
             ),
-
         ],
-
         [
-
             InlineKeyboardButton(
                 "480p",
                 callback_data="download|480"
             ),
-
             InlineKeyboardButton(
                 "720p",
                 callback_data="download|720"
             ),
-
         ],
-
         [
-
             InlineKeyboardButton(
                 "1080p",
                 callback_data="download|1080"
             )
-
         ],
-
         [
-
             InlineKeyboardButton(
                 "🎵 MP3",
                 callback_data="download|mp3"
             )
-
         ],
-
-        # ====================================================
-        # Separate Contact Developer Button
-        # ====================================================
-
         [
-
+            # Separate Contact Developer button.
             developer_button()
-
         ],
-
     ]
-
 
     return InlineKeyboardMarkup(
         keyboard
@@ -2079,11 +1755,6 @@ async def edit_callback_message(
         query.message
     )
 
-
-    # ========================================================
-    # PHOTO MESSAGE
-    # ========================================================
-
     if (
         message
         and message.photo
@@ -2092,15 +1763,10 @@ async def edit_callback_message(
         try:
 
             return await query.edit_message_caption(
-
                 caption=text,
-
                 parse_mode=parse_mode,
-
                 reply_markup=reply_markup
-
             )
-
 
         except Exception as error:
 
@@ -2109,19 +1775,13 @@ async def edit_callback_message(
                 error
             )
 
-
             try:
 
                 return await message.reply_text(
-
                     text=text,
-
                     parse_mode=parse_mode,
-
                     reply_markup=reply_markup
-
                 )
-
 
             except Exception as fallback_error:
 
@@ -2130,26 +1790,15 @@ async def edit_callback_message(
                     fallback_error
                 )
 
-
                 return None
-
-
-    # ========================================================
-    # TEXT MESSAGE
-    # ========================================================
 
     try:
 
         return await query.edit_message_text(
-
             text=text,
-
             parse_mode=parse_mode,
-
             reply_markup=reply_markup
-
         )
-
 
     except Exception as error:
 
@@ -2158,21 +1807,15 @@ async def edit_callback_message(
             error
         )
 
-
         try:
 
             if message:
 
                 return await message.reply_text(
-
                     text=text,
-
                     parse_mode=parse_mode,
-
                     reply_markup=reply_markup
-
                 )
-
 
         except Exception as fallback_error:
 
@@ -2180,7 +1823,6 @@ async def edit_callback_message(
                 "Fallback message failed: %s",
                 fallback_error
             )
-
 
         return None
 
@@ -2198,7 +1840,6 @@ async def handle_url(
         update.message
     )
 
-
     if (
         not message
         or not message.text
@@ -2206,64 +1847,46 @@ async def handle_url(
 
         return
 
-
-    # ========================================================
-    # Register user
-    # ========================================================
-
     await asyncio.to_thread(
         register_user_sync,
         update.effective_user
     )
 
-
     url = (
         message.text.strip()
     )
 
-
     if not url:
         return
-
 
     url = (
         url.split()[0]
     )
-
 
     if not is_supported_url(
         url
     ):
 
         await message.reply_text(
-
             "❌ ဒီ Link ကို support "
             "မလုပ်ပါဘူး။\n\n"
-
             "YouTube သို့မဟုတ် TikTok "
             "Link ပဲ ပို့ပေးပါ။"
-
         )
 
         return
-
 
     platform = (
         get_platform(url)
     )
 
-
     status_message = (
         await message.reply_text(
-
             "🔎 Video Information "
             "ရှာနေပါတယ်...\n\n"
-
             "⏳ ခဏစောင့်ပေးပါ။"
-
         )
     )
-
 
     try:
 
@@ -2271,31 +1894,23 @@ async def handle_url(
             ChatAction.TYPING
         )
 
-
         info = await asyncio.to_thread(
-
             get_video_info_sync,
-
             url
-
         )
-
 
         title = info.get(
             "title",
             "Unknown"
         )
 
-
         duration = info.get(
             "duration"
         )
 
-
         thumbnail = info.get(
             "thumbnail"
         )
-
 
         if duration:
 
@@ -2303,16 +1918,13 @@ async def handle_url(
                 duration // 60
             )
 
-
             seconds = int(
                 duration % 60
             )
 
-
             duration_text = (
                 f"{minutes}:{seconds:02d}"
             )
-
 
         else:
 
@@ -2320,9 +1932,7 @@ async def handle_url(
                 "Unknown"
             )
 
-
         available_heights = set()
-
 
         for fmt in info.get(
             "formats",
@@ -2332,7 +1942,6 @@ async def handle_url(
             height = fmt.get(
                 "height"
             )
-
 
             if height:
 
@@ -2349,9 +1958,7 @@ async def handle_url(
 
                     pass
 
-
         quality_lines = []
-
 
         for q in [
             240,
@@ -2376,83 +1983,57 @@ async def handle_url(
                     f"❌ {q}p"
                 )
 
-
         platform_name = (
-
             "YouTube"
-
             if platform == "youtube"
-
             else "TikTok"
-
         )
-
 
         safe_title = escape(
             str(title)[:500]
         )
 
-
         text = (
-
             "🎬 <b>Video Found</b>\n\n"
-
             f"📌 <b>Title:</b>\n"
             f"{safe_title}\n\n"
-
             f"🌐 <b>Platform:</b> "
             f"{platform_name}\n"
-
             f"⏱ <b>Duration:</b> "
             f"{duration_text}\n\n"
-
             "📊 <b>Available Quality</b>\n"
-
             + "\n".join(
                 quality_lines
             )
-
             + "\n\n"
-
             "👇 <b>Download Quality "
             "ရွေးပါ</b>"
-
         )
-
 
         context.user_data[
             "video_url"
         ] = url
 
-
         context.user_data[
             "video_title"
         ] = title
-
 
         if thumbnail:
 
             try:
 
                 await message.reply_photo(
-
                     photo=thumbnail,
-
                     caption=text,
-
                     parse_mode="HTML",
-
                     reply_markup=(
                         build_quality_keyboard()
                     )
-
                 )
-
 
                 await status_message.delete()
 
                 return
-
 
             except Exception as error:
 
@@ -2461,19 +2042,13 @@ async def handle_url(
                     error
                 )
 
-
         await status_message.edit_text(
-
             text=text,
-
             parse_mode="HTML",
-
             reply_markup=(
                 build_quality_keyboard()
             )
-
         )
-
 
     except yt_dlp.utils.DownloadError as error:
 
@@ -2481,83 +2056,54 @@ async def handle_url(
             error
         )
 
-
         logger.error(
-
             "yt-dlp extraction failed:\n%s",
-
             error_text,
-
             exc_info=True
-
         )
 
-
         if (
-
             "Sign in to confirm"
             in error_text
-
             or "not a bot"
             in error_text
-
             or "confirm you're not a bot"
             in error_text
-
         ):
 
             await status_message.edit_text(
-
                 "❌ <b>YouTube Access Error</b>\n\n"
-
                 "YouTube က ဒီ server request ကို "
                 "bot traffic လို့ သတ်မှတ်ထားပါတယ်။\n\n"
-
                 "🔐 Render Secret File ထဲမှာ "
                 "<b>cookies.txt</b> ရှိ/မရှိ စစ်ပါ။\n\n"
-
                 "⚠️ Cookies သက်တမ်းကုန်ခြင်း၊ "
                 "YouTube verification သို့မဟုတ် "
                 "server-side restriction ဖြစ်နိုင်ပါတယ်။",
-
                 parse_mode="HTML"
-
             )
-
 
         else:
 
             await status_message.edit_text(
-
                 "❌ Video Information ရယူလို့ "
                 "မရပါဘူး။\n\n"
-
                 "ခဏနေပြီး Link တစ်ခုနဲ့ "
                 "ထပ်စမ်းကြည့်ပါ။"
-
             )
-
 
     except Exception as error:
 
         logger.error(
-
             "Information extraction failed: %s",
-
             error,
-
             exc_info=True
-
         )
 
-
         await status_message.edit_text(
-
             "❌ Video Information ရယူရာမှာ "
             "Error ဖြစ်သွားပါတယ်။\n\n"
-
             "ခဏနေပြီး ပြန်စမ်းကြည့်ပါ။"
-
         )
 
 
@@ -2574,19 +2120,15 @@ async def download_callback(
         update.callback_query
     )
 
-
     if not query:
         return
 
-
     await query.answer()
-
 
     data = (
         query.data
         or ""
     )
-
 
     if not data.startswith(
         "download|"
@@ -2594,12 +2136,10 @@ async def download_callback(
 
         return
 
-
     quality = data.split(
         "|",
         1
     )[1]
-
 
     url = (
         context.user_data.get(
@@ -2607,107 +2147,70 @@ async def download_callback(
         )
     )
 
-
     if not url:
 
         await edit_callback_message(
-
             query,
-
             "❌ Download session "
             "မတွေ့တော့ပါဘူး။\n\n"
-
             "Link ကို ပြန်ပို့ပြီး "
             "ထပ်စမ်းပါ။",
-
             parse_mode=None
-
         )
 
         return
-
-
-    # ========================================================
-    # Prevent duplicate clicks
-    # ========================================================
 
     if context.user_data.get(
         "download_busy"
     ):
 
         await query.answer(
-
             "⏳ Download တစ်ခု "
             "လုပ်နေပြီးသားပါ။",
-
             show_alert=False
-
         )
 
         return
-
 
     context.user_data[
         "download_busy"
     ] = True
 
-
     quality_label = (
-
         "MP3"
-
         if quality == "mp3"
-
         else f"{quality}p"
-
     )
 
-
     file_path = None
-
 
     try:
 
         await edit_callback_message(
-
             query,
-
             f"⏳ <b>{quality_label}</b> "
             "Download လုပ်နေပါတယ်...\n\n"
-
             "📥 Server က file ပြင်ဆင်နေပါတယ်။\n"
-
             "ခဏစောင့်ပေးပါ။"
-
         )
-
 
         if query.message:
 
             await query.message.chat.send_action(
-
                 ChatAction.UPLOAD_DOCUMENT
-
             )
-
 
         file_path, title = (
             await asyncio.to_thread(
-
                 download_video_sync,
-
                 url,
-
                 quality
-
             )
         )
-
 
         file_path_obj = Path(
             file_path
         )
-
 
         if not file_path_obj.exists():
 
@@ -2715,81 +2218,48 @@ async def download_callback(
                 "Downloaded file not found."
             )
 
-
         file_size = (
             file_path_obj.stat().st_size
         )
 
-
         logger.info(
-
             "Sending file: %s | %.2f MB",
-
             file_path,
-
             file_size / (
                 1024 * 1024
             )
-
         )
 
-
         caption = (
-
             "✅ <b>Download ပြီးပါပြီ!</b>\n\n"
-
             f"🎬 <b>"
             f"{escape(str(title)[:500])}"
             f"</b>\n"
-
             f"📥 Quality: "
             f"<b>{quality_label}</b>\n\n"
-
             "🤖 MM Video Downloader"
-
         )
-
 
         await query.message.reply_document(
-
             document=file_path,
-
             caption=caption,
-
             parse_mode="HTML"
-
         )
-
-
-        # ====================================================
-        # Register successful download
-        # ====================================================
 
         await asyncio.to_thread(
-
             register_download_sync,
-
             update.effective_user.id,
-
             get_platform(url),
-
             quality
-
         )
-
 
         await edit_callback_message(
-
             query,
-
             f"✅ <b>{quality_label}</b> "
             "Download ပြီးပါပြီ။\n\n"
-
             "📤 File ကို အပေါ်မှာ "
             "ပို့ပေးထားပါတယ်။"
-
         )
-
 
     except RuntimeError as error:
 
@@ -2797,17 +2267,11 @@ async def download_callback(
             error
         )
 
-
         logger.error(
-
             "Download runtime error: %s",
-
             error_text,
-
             exc_info=True
-
         )
-
 
         if error_text.startswith(
             "FILE_TOO_LARGE:"
@@ -2820,40 +2284,27 @@ async def download_callback(
                 )[1]
             )
 
-
             await edit_callback_message(
-
                 query,
-
                 "❌ <b>File Size "
                 "ကြီးလွန်းပါတယ်။</b>\n\n"
-
                 f"📦 File Size: "
                 f"{size_text} MB\n"
-
                 f"📌 Maximum: "
                 f"{MAX_FILE_SIZE_MB} MB\n\n"
-
                 "Quality နိမ့်တဲ့ option "
                 "တစ်ခုကို ရွေးပြီး "
                 "ထပ်စမ်းကြည့်ပါ။"
-
             )
-
 
         else:
 
             await edit_callback_message(
-
                 query,
-
                 "❌ Download "
                 "မအောင်မြင်ပါဘူး။\n\n"
-
                 "ခဏနေပြီး ပြန်စမ်းကြည့်ပါ။"
-
             )
-
 
     except yt_dlp.utils.DownloadError as error:
 
@@ -2861,96 +2312,58 @@ async def download_callback(
             error
         )
 
-
         logger.error(
-
             "yt-dlp download failed:\n%s",
-
             error_text,
-
             exc_info=True
-
         )
 
-
         if (
-
             "Sign in to confirm"
             in error_text
-
             or "not a bot"
             in error_text
-
             or "confirm you're not a bot"
             in error_text
-
         ):
 
             await edit_callback_message(
-
                 query,
-
                 "❌ <b>YouTube Access Error</b>\n\n"
-
                 "YouTube က server request ကို "
                 "bot traffic လို့ သတ်မှတ်ထားပါတယ်။\n\n"
-
                 "🔐 cookies.txt ကို Render "
                 "Secret File ထဲမှာ မှန်မှန်ထည့်ထားကြောင်း "
                 "စစ်ပါ။"
-
             )
-
 
         else:
 
             await edit_callback_message(
-
                 query,
-
                 "❌ <b>Download Error</b>\n\n"
-
                 "Video ကို download လုပ်လို့ "
                 "မရပါဘူး။\n\n"
-
                 "ခဏနေပြီး ပြန်စမ်းကြည့်ပါ။"
-
             )
-
 
     except Exception as error:
 
         logger.error(
-
             "Unexpected download error: %s",
-
             error,
-
             exc_info=True
-
         )
-
 
         await edit_callback_message(
-
             query,
-
             "❌ <b>Download လုပ်ရာမှာ "
             "Error ဖြစ်သွားပါတယ်။</b>\n\n"
-
             "Quality နိမ့်တဲ့ option တစ်ခုနဲ့ "
             "ထပ်စမ်းကြည့်ပါ။"
-
         )
 
-
     finally:
-
-        # ====================================================
-        # IMPORTANT:
-        # Delete downloaded directory immediately
-        # after sending / error.
-        # ====================================================
 
         try:
 
@@ -2960,26 +2373,17 @@ async def download_callback(
                     file_path
                 )
 
-
                 shutil.rmtree(
-
                     file_path_obj.parent,
-
                     ignore_errors=True
-
                 )
-
 
         except Exception as cleanup_error:
 
             logger.warning(
-
                 "Immediate cleanup failed: %s",
-
                 cleanup_error
-
             )
-
 
         context.user_data[
             "download_busy"
@@ -2999,63 +2403,43 @@ async def callback_router(
         update.callback_query
     )
 
-
     if not query:
         return
 
-
-    # ========================================================
-    # Register user
-    # ========================================================
-
     await asyncio.to_thread(
-
         register_user_sync,
-
         update.effective_user
-
     )
-
 
     data = (
         query.data
         or ""
     )
 
-
     logger.info(
         "Callback received: %s",
         data
     )
-
 
     if data.startswith(
         "download|"
     ):
 
         await download_callback(
-
             update,
-
             context
-
         )
 
         return
-
 
     if data == "developer":
 
         await contact_developer(
-
             update,
-
             context
-
         )
 
         return
-
 
     await query.answer()
 
@@ -3070,49 +2454,75 @@ async def error_handler(
 ):
 
     logger.error(
-
         "Unhandled exception:",
-
         exc_info=context.error
-
     )
 
 
 # ============================================================
 # HEALTH CHECK SERVER
+#
+# IMPORTANT FIX:
+# UptimeRobot / monitoring services may send HEAD requests.
+# The old server only handled GET, which could return:
+# 501 Not Implemented
+#
+# This version supports BOTH GET and HEAD.
 # ============================================================
 
 class HealthHandler(
     BaseHTTPRequestHandler
 ):
 
-    def do_GET(self):
+    def _send_health_response(
+        self,
+        include_body=True
+    ):
+
+        body = (
+            b"MM Video Downloader "
+            b"Bot is running."
+        )
 
         self.send_response(
             200
         )
 
-
         self.send_header(
-
             "Content-Type",
-
             "text/plain; "
             "charset=utf-8"
-
         )
 
+        self.send_header(
+            "Content-Length",
+            str(len(body))
+        )
+
+        self.send_header(
+            "Cache-Control",
+            "no-cache"
+        )
 
         self.end_headers()
 
+        if include_body:
 
-        self.wfile.write(
+            self.wfile.write(
+                body
+            )
 
-            b"MM Video Downloader "
-            b"Bot is running."
+    def do_GET(self):
 
+        self._send_health_response(
+            include_body=True
         )
 
+    def do_HEAD(self):
+
+        self._send_health_response(
+            include_body=False
+        )
 
     def log_message(
         self,
@@ -3126,26 +2536,18 @@ class HealthHandler(
 def run_health_server():
 
     server = HTTPServer(
-
         (
             "0.0.0.0",
             PORT
         ),
-
         HealthHandler
-
     )
-
 
     logger.info(
-
         "Health server running "
         "on port %s",
-
         PORT
-
     )
-
 
     server.serve_forever()
 
@@ -3156,10 +2558,7 @@ def run_health_server():
 
 def main():
 
-    # ========================================================
-    # Initialize database
-    # ========================================================
-
+    # Initialize database.
     try:
 
         init_database()
@@ -3171,56 +2570,36 @@ def main():
     except Exception as error:
 
         logger.error(
-
             "Database initialization failed: %s",
-
             error,
-
             exc_info=True
-
         )
 
         raise
 
-
-    # ========================================================
-    # Prepare cookies
-    # ========================================================
-
+    # Prepare cookies.
     try:
 
         cookie_file = (
             get_cookie_file()
         )
 
-
         if cookie_file:
 
             logger.info(
-
                 "Runtime YouTube cookie "
                 "file ready: %s",
-
                 cookie_file
-
             )
-
 
     except Exception as error:
 
         logger.warning(
-
             "Cookie preparation failed: %s",
-
             error
-
         )
 
-
-    # ========================================================
-    # Initial cleanup
-    # ========================================================
-
+    # Initial cleanup.
     try:
 
         cleanup_downloads()
@@ -3228,160 +2607,96 @@ def main():
     except Exception as error:
 
         logger.warning(
-
             "Initial cleanup failed: %s",
-
             error
-
         )
 
-
-    # ========================================================
-    # Auto cleanup thread
-    # ========================================================
-
+    # Auto cleanup thread.
     cleanup_thread = threading.Thread(
-
         target=cleanup_loop,
-
         daemon=True
-
     )
-
 
     cleanup_thread.start()
 
-
-    # ========================================================
-    # Health server
-    # ========================================================
-
+    # Health server.
     health_thread = threading.Thread(
-
         target=run_health_server,
-
         daemon=True
-
     )
-
 
     health_thread.start()
 
-
-    # ========================================================
-    # Telegram Application
-    # ========================================================
-
+    # Telegram Application.
     application = (
-
         Application.builder()
-
         .token(BOT_TOKEN)
-
         .build()
-
     )
 
-
-    # ========================================================
-    # Handlers
-    # ========================================================
-
+    # Handlers.
     application.add_handler(
-
         CommandHandler(
-
             "start",
-
             start
-
         )
-
     )
 
-
     application.add_handler(
-
         CommandHandler(
-
             "stats",
-
             stats
-
         )
-
     )
 
-
     application.add_handler(
-
         MessageHandler(
-
             filters.TEXT
             & ~filters.COMMAND,
-
             handle_url
-
         )
-
     )
-
 
     application.add_handler(
-
         CallbackQueryHandler(
-
             callback_router
-
         )
-
     )
-
 
     application.add_error_handler(
-
         error_handler
-
     )
 
-
     logger.info(
-
         "MM Video Downloader Bot "
         "starting..."
-
     )
 
-
     logger.info(
-
         "Developer: @%s",
-
         DEVELOPER_USERNAME
-
     )
 
+    logger.info(
+        "Contact Developer button: ON"
+    )
 
     logger.info(
-
         "Auto cleanup: ON"
-
     )
-
 
     logger.info(
-
         "Statistics: ON"
-
     )
 
+    logger.info(
+        "Health check: GET + HEAD enabled"
+    )
 
     application.run_polling(
-
         allowed_updates=(
             Update.ALL_TYPES
         )
-
     )
 
 
