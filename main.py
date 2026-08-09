@@ -36,21 +36,29 @@ DEVELOPER_USERNAME = os.getenv(
     "superraiz07"
 ).strip()
 
-# Render Secret File:
+# Render Secret File
+# Example:
 # /etc/secrets/cookies.txt
-#
-# Local:
-# ./cookies.txt
 YOUTUBE_COOKIES_FILE = os.getenv(
     "YOUTUBE_COOKIES_FILE",
     "/etc/secrets/cookies.txt"
 ).strip()
 
+# Optional User-Agent
+YOUTUBE_USER_AGENT = os.getenv(
+    "YOUTUBE_USER_AGENT",
+    ""
+).strip()
+
+# Telegram Bot API practical upload limit
 MAX_FILE_SIZE_MB = 49
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
 DOWNLOAD_DIR = Path("/tmp/mm_video_downloads")
-DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+DOWNLOAD_DIR.mkdir(
+    parents=True,
+    exist_ok=True
+)
 
 
 # ============================================================
@@ -71,7 +79,8 @@ logger = logging.getLogger(__name__)
 
 if not BOT_TOKEN:
     raise RuntimeError(
-        "BOT_TOKEN is missing. Add BOT_TOKEN to Render Environment Variables."
+        "BOT_TOKEN is missing. "
+        "Add BOT_TOKEN to Render Environment Variables."
     )
 
 
@@ -83,6 +92,7 @@ YOUTUBE_HOSTS = {
     "youtube.com",
     "www.youtube.com",
     "m.youtube.com",
+    "music.youtube.com",
     "youtu.be",
     "www.youtu.be",
 }
@@ -96,6 +106,7 @@ TIKTOK_HOSTS = {
 
 
 def get_platform(url: str):
+
     try:
         host = urlparse(url).netloc.lower()
     except Exception:
@@ -103,22 +114,39 @@ def get_platform(url: str):
 
     host = host.split(":")[0]
 
-    if host in YOUTUBE_HOSTS or host.endswith(".youtube.com"):
+    if (
+        host in YOUTUBE_HOSTS
+        or host.endswith(".youtube.com")
+    ):
         return "youtube"
 
-    if host in TIKTOK_HOSTS or host.endswith(".tiktok.com"):
+    if (
+        host in TIKTOK_HOSTS
+        or host.endswith(".tiktok.com")
+    ):
         return "tiktok"
 
     return None
 
 
 def is_supported_url(url: str):
+
     return get_platform(url) is not None
 
 
 def clean_filename(name: str):
-    name = re.sub(r'[\\/*?:"<>|]', "_", name)
-    name = re.sub(r"\s+", " ", name).strip()
+
+    name = re.sub(
+        r'[\\/*?:"<>|]',
+        "_",
+        name
+    )
+
+    name = re.sub(
+        r"\s+",
+        " ",
+        name
+    ).strip()
 
     if not name:
         name = "video"
@@ -126,100 +154,176 @@ def clean_filename(name: str):
     return name[:150]
 
 
-def get_cookie_file():
-    """
-    Search for cookies file.
+# ============================================================
+# COOKIE FILE
+# ============================================================
 
-    Priority:
-    1. YOUTUBE_COOKIES_FILE environment variable
-    2. /etc/secrets/cookies.txt
-    3. ./cookies.txt
-    """
+def get_cookie_file():
 
     candidates = []
 
     if YOUTUBE_COOKIES_FILE:
-        candidates.append(Path(YOUTUBE_COOKIES_FILE))
+        candidates.append(
+            Path(YOUTUBE_COOKIES_FILE)
+        )
 
-    candidates.append(Path("/etc/secrets/cookies.txt"))
-    candidates.append(Path("cookies.txt"))
+    candidates.append(
+        Path("/etc/secrets/cookies.txt")
+    )
+
+    candidates.append(
+        Path("cookies.txt")
+    )
 
     for path in candidates:
-        if path.exists() and path.is_file():
-            logger.info("YouTube cookies found: %s", path)
-            return str(path)
 
-    logger.warning("YouTube cookies file not found.")
+        try:
+
+            if (
+                path.exists()
+                and path.is_file()
+                and path.stat().st_size > 0
+            ):
+
+                logger.info(
+                    "YouTube cookies found: %s",
+                    path
+                )
+
+                return str(path)
+
+        except Exception as e:
+
+            logger.warning(
+                "Could not inspect cookie file %s: %s",
+                path,
+                e
+            )
+
+    logger.warning(
+        "YouTube cookies file not found."
+    )
+
     return None
 
 
 # ============================================================
-# YT-DLP CONFIG
+# COMMON YT-DLP OPTIONS
 # ============================================================
 
 def base_ydl_options():
-    """
-    Common yt-dlp settings.
-    """
 
     options = {
+
+        # Output
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
-        "nocheckcertificate": True,
 
-        # Prevent excessively large HTTP chunks.
-        "http_chunk_size": 10 * 1024 * 1024,
-
-        # Better compatibility.
+        # Network
+        "socket_timeout": 30,
         "retries": 3,
         "fragment_retries": 3,
 
-        # Don't use playlist mode.
+        # YouTube recommends keeping chunk size <= 10 MB
+        "http_chunk_size": 10 * 1024 * 1024,
+
+        # Single video only
         "noplaylist": True,
 
-        # Keep network requests reasonable.
-        "socket_timeout": 30,
+        # Certificate
+        "nocheckcertificate": True,
+
+        # Continue downloads
+        "continuedl": True,
+
+        # Don't overwrite existing files
+        "overwrites": True,
+
+        # Use Deno for yt-dlp JS challenges
+        "js_runtimes": {
+            "deno": {}
+        },
     }
 
     return options
 
 
+# ============================================================
+# YOUTUBE OPTIONS
+# ============================================================
+
 def youtube_ydl_options(download=False):
+
     options = base_ydl_options()
 
     cookie_file = get_cookie_file()
 
     if cookie_file:
+
         options["cookiefile"] = cookie_file
-        logger.info("Using YouTube cookies.")
-    else:
-        logger.warning(
-            "No YouTube cookies available. "
-            "YouTube may return 'Sign in to confirm you're not a bot'."
+
+        logger.info(
+            "YouTube cookies enabled."
         )
 
-    # Current yt-dlp YouTube clients.
+    else:
+
+        logger.warning(
+            "No YouTube cookies available."
+        )
+
+    # --------------------------------------------------------
+    # Optional User-Agent
+    # --------------------------------------------------------
+
+    if YOUTUBE_USER_AGENT:
+
+        options["http_headers"] = {
+            "User-Agent": YOUTUBE_USER_AGENT
+        }
+
+    # --------------------------------------------------------
+    # YouTube clients
     #
-    # web_safari can provide HLS formats in some cases.
-    # web_embedded works only for embeddable videos.
+    # web_safari:
+    #   Useful for HLS formats.
+    #
+    # web_embedded:
+    #   Only works for embeddable videos.
+    #
+    # tv:
+    #   Some public videos may work through TV client.
+    # --------------------------------------------------------
+
     options["extractor_args"] = {
         "youtube": {
-            "player_client": ["web_safari", "web_embedded"]
+            "player_client": [
+                "web_safari",
+                "tv",
+                "web_embedded"
+            ]
         }
     }
 
     if download:
+
         options["continuedl"] = True
         options["overwrites"] = True
 
     return options
 
 
+# ============================================================
+# TIKTOK OPTIONS
+# ============================================================
+
 def tiktok_ydl_options(download=False):
+
     options = base_ydl_options()
 
     if download:
+
         options["continuedl"] = True
         options["overwrites"] = True
 
@@ -231,18 +335,29 @@ def tiktok_ydl_options(download=False):
 # ============================================================
 
 def get_video_info_sync(url: str):
+
     platform = get_platform(url)
 
     if platform == "youtube":
-        options = youtube_ydl_options(download=False)
+
+        options = youtube_ydl_options(
+            download=False
+        )
 
     elif platform == "tiktok":
-        options = tiktok_ydl_options(download=False)
+
+        options = tiktok_ydl_options(
+            download=False
+        )
 
     else:
-        raise ValueError("Unsupported URL")
+
+        raise ValueError(
+            "Unsupported URL"
+        )
 
     with yt_dlp.YoutubeDL(options) as ydl:
+
         return ydl.extract_info(
             url,
             download=False
@@ -253,27 +368,30 @@ def get_video_info_sync(url: str):
 # DOWNLOAD
 # ============================================================
 
-def download_video_sync(url: str, quality: str):
-    """
-    Download selected video quality.
-
-    quality:
-        240
-        360
-        480
-        720
-        1080
-        mp3
-    """
+def download_video_sync(
+    url: str,
+    quality: str
+):
 
     platform = get_platform(url)
 
     if platform == "youtube":
-        options = youtube_ydl_options(download=True)
+
+        options = youtube_ydl_options(
+            download=True
+        )
+
     elif platform == "tiktok":
-        options = tiktok_ydl_options(download=True)
+
+        options = tiktok_ydl_options(
+            download=True
+        )
+
     else:
-        raise ValueError("Unsupported URL")
+
+        raise ValueError(
+            "Unsupported URL"
+        )
 
     unique_dir = tempfile.mkdtemp(
         prefix="mm_video_",
@@ -292,7 +410,11 @@ def download_video_sync(url: str, quality: str):
     if quality == "mp3":
 
         options.update({
-            "format": "bestaudio/best",
+
+            "format": (
+                "bestaudio/best"
+            ),
+
             "outtmpl": output_template,
 
             "postprocessors": [
@@ -312,18 +434,17 @@ def download_video_sync(url: str, quality: str):
 
         height = int(quality)
 
-        # Video + Audio.
-        #
-        # If separate streams are unavailable,
-        # fallback to a combined format.
         format_string = (
-            f"bestvideo[height<={height}]+bestaudio/"
+            f"bestvideo[height<={height}]"
+            f"+bestaudio/"
             f"best[height<={height}]/"
             f"best"
         )
 
         options.update({
+
             "format": format_string,
+
             "outtmpl": output_template,
 
             "merge_output_format": "mp4",
@@ -339,30 +460,41 @@ def download_video_sync(url: str, quality: str):
             )
 
             requested_title = clean_filename(
-                info.get("title", "video")
+                info.get(
+                    "title",
+                    "video"
+                )
             )
 
-        files = list(Path(unique_dir).glob("*"))
+        files = list(
+            Path(unique_dir).glob("*")
+        )
 
-        # Remove temporary files.
         files = [
-            f for f in files
-            if f.is_file()
-            and f.suffix.lower() not in {
-                ".part",
-                ".ytdl"
-            }
+            f
+            for f in files
+            if (
+                f.is_file()
+                and f.suffix.lower()
+                not in {
+                    ".part",
+                    ".ytdl"
+                }
+            )
         ]
 
         if not files:
+
             raise RuntimeError(
-                "Download completed but output file was not found."
+                "Download completed but "
+                "output file was not found."
             )
 
-        # Prefer final mp4/mp3.
         preferred = [
-            f for f in files
-            if f.suffix.lower() in {
+            f
+            for f in files
+            if f.suffix.lower()
+            in {
                 ".mp4",
                 ".mp3",
                 ".m4a",
@@ -372,41 +504,55 @@ def download_video_sync(url: str, quality: str):
         ]
 
         if preferred:
+
             file_path = max(
                 preferred,
                 key=lambda p: p.stat().st_size
             )
+
         else:
+
             file_path = max(
                 files,
                 key=lambda p: p.stat().st_size
             )
 
         if not file_path.exists():
-            raise RuntimeError("Downloaded file does not exist.")
+
+            raise RuntimeError(
+                "Downloaded file does not exist."
+            )
 
         file_size = file_path.stat().st_size
 
         logger.info(
             "Downloaded: %s | %.2f MB",
             file_path,
-            file_size / (1024 * 1024)
+            file_size / (
+                1024 * 1024
+            )
         )
 
         if file_size > MAX_FILE_SIZE_BYTES:
+
             raise RuntimeError(
-                f"File is too large for Telegram Bot API "
-                f"limit used by this bot. "
-                f"Size: {file_size / (1024 * 1024):.1f} MB"
+                "File is too large for Telegram. "
+                f"Size: "
+                f"{file_size / (1024 * 1024):.1f} MB"
             )
 
-        return str(file_path), requested_title
+        return (
+            str(file_path),
+            requested_title
+        )
 
     except Exception:
+
         shutil.rmtree(
             unique_dir,
             ignore_errors=True
         )
+
         raise
 
 
@@ -414,12 +560,23 @@ def download_video_sync(url: str, quality: str):
 # START
 # ============================================================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    if not update.message:
+        return
 
     text = (
         "👋 မင်္ဂလာပါ!\n\n"
-        "🎬 YouTube / TikTok Video Downloader Bot ဖြစ်ပါတယ်။\n\n"
-        "🔗 YouTube သို့မဟုတ် TikTok Video Link ပို့ပါ။\n\n"
+
+        "🎬 YouTube / TikTok "
+        "Video Downloader Bot ဖြစ်ပါတယ်။\n\n"
+
+        "🔗 YouTube သို့မဟုတ် TikTok "
+        "Video Link ပို့ပါ။\n\n"
+
         "📥 ရနိုင်သော Quality များ\n"
         "• 240p\n"
         "• 360p\n"
@@ -427,10 +584,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• 720p\n"
         "• 1080p\n"
         "• MP3\n\n"
+
         "👇 Video Link ပို့လိုက်ပါ။"
     )
 
-    await update.message.reply_text(text)
+    await update.message.reply_text(
+        text
+    )
 
 
 # ============================================================
@@ -446,27 +606,36 @@ async def contact_developer(
 
     await query.answer()
 
-    username = DEVELOPER_USERNAME.lstrip("@")
+    username = (
+        DEVELOPER_USERNAME
+        .lstrip("@")
+    )
 
     text = (
         "👨‍💻 Developer ကို ဆက်သွယ်ရန်\n\n"
+
         f"Telegram: @{username}\n\n"
+
         "Bot Development / Custom Bot အတွက်\n"
         "Developer ကို တိုက်ရိုက်ဆက်သွယ်နိုင်ပါတယ်။"
     )
 
     keyboard = [
+
         [
             InlineKeyboardButton(
                 "👨‍💻 Contact Developer",
                 url=f"https://t.me/{username}"
             )
         ]
+
     ]
 
     await query.edit_message_text(
         text=text,
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        reply_markup=InlineKeyboardMarkup(
+            keyboard
+        )
     )
 
 
@@ -477,38 +646,45 @@ async def contact_developer(
 def build_quality_keyboard():
 
     keyboard = [
+
         [
             InlineKeyboardButton(
                 "240p",
                 callback_data="download|240"
             ),
+
             InlineKeyboardButton(
                 "360p",
                 callback_data="download|360"
             ),
         ],
+
         [
             InlineKeyboardButton(
                 "480p",
                 callback_data="download|480"
             ),
+
             InlineKeyboardButton(
                 "720p",
                 callback_data="download|720"
             ),
         ],
+
         [
             InlineKeyboardButton(
                 "1080p",
                 callback_data="download|1080"
             )
         ],
+
         [
             InlineKeyboardButton(
                 "🎵 MP3",
                 callback_data="download|mp3"
             )
         ],
+
         [
             InlineKeyboardButton(
                 "👨‍💻 Contact Developer",
@@ -517,7 +693,9 @@ def build_quality_keyboard():
         ],
     ]
 
-    return InlineKeyboardMarkup(keyboard)
+    return InlineKeyboardMarkup(
+        keyboard
+    )
 
 
 # ============================================================
@@ -531,12 +709,15 @@ async def handle_url(
 
     message = update.message
 
-    if not message or not message.text:
+    if (
+        not message
+        or not message.text
+    ):
         return
 
     url = message.text.strip()
 
-    # Remove extra spaces.
+    # Take first token only
     url = url.split()[0]
 
     if not is_supported_url(url):
@@ -579,44 +760,76 @@ async def handle_url(
             "thumbnail"
         )
 
-        # ----------------------------------------------------
-        # Duration
-        # ----------------------------------------------------
+        # ====================================================
+        # DURATION
+        # ====================================================
 
         if duration:
-            minutes = int(duration // 60)
-            seconds = int(duration % 60)
-            duration_text = f"{minutes}:{seconds:02d}"
+
+            minutes = int(
+                duration // 60
+            )
+
+            seconds = int(
+                duration % 60
+            )
+
+            duration_text = (
+                f"{minutes}:{seconds:02d}"
+            )
+
         else:
+
             duration_text = "Unknown"
 
-        # ----------------------------------------------------
-        # Available heights
-        # ----------------------------------------------------
+        # ====================================================
+        # AVAILABLE QUALITIES
+        # ====================================================
 
         available_heights = set()
 
-        for fmt in info.get("formats", []):
+        for fmt in info.get(
+            "formats",
+            []
+        ):
 
-            height = fmt.get("height")
+            height = fmt.get(
+                "height"
+            )
 
             if height:
+
                 try:
+
                     available_heights.add(
                         int(height)
                     )
+
                 except Exception:
+
                     pass
 
         quality_lines = []
 
-        for q in [240, 360, 480, 720, 1080]:
+        for q in [
+            240,
+            360,
+            480,
+            720,
+            1080
+        ]:
 
-            if any(h >= q for h in available_heights):
+            if any(
+                h >= q
+                for h in available_heights
+            ):
+
                 quality_lines.append(
                     f"✅ {q}p"
                 )
+
             else:
+
                 quality_lines.append(
                     f"❌ {q}p"
                 )
@@ -629,26 +842,39 @@ async def handle_url(
 
         text = (
             "🎬 <b>Video Found</b>\n\n"
+
             f"📌 <b>Title:</b>\n"
             f"{title[:500]}\n\n"
-            f"🌐 <b>Platform:</b> {platform_name}\n"
-            f"⏱ <b>Duration:</b> {duration_text}\n\n"
+
+            f"🌐 <b>Platform:</b> "
+            f"{platform_name}\n"
+
+            f"⏱ <b>Duration:</b> "
+            f"{duration_text}\n\n"
+
             "📊 <b>Available Quality</b>\n"
-            + "\n".join(quality_lines)
+
+            + "\n".join(
+                quality_lines
+            )
+
             + "\n\n"
+
             "👇 <b>Download Quality ရွေးပါ</b>"
         )
 
-        # ----------------------------------------------------
-        # Save URL in callback state.
-        # ----------------------------------------------------
+        # Save session
+        context.user_data[
+            "video_url"
+        ] = url
 
-        context.user_data["video_url"] = url
-        context.user_data["video_title"] = title
+        context.user_data[
+            "video_title"
+        ] = title
 
-        # ----------------------------------------------------
-        # Thumbnail
-        # ----------------------------------------------------
+        # ====================================================
+        # THUMBNAIL
+        # ====================================================
 
         if thumbnail:
 
@@ -672,9 +898,9 @@ async def handle_url(
                     thumbnail_error
                 )
 
-        # ----------------------------------------------------
-        # Text fallback
-        # ----------------------------------------------------
+        # ====================================================
+        # TEXT FALLBACK
+        # ====================================================
 
         await status_message.edit_text(
             text=text,
@@ -692,24 +918,28 @@ async def handle_url(
             exc_info=True
         )
 
-        # ----------------------------------------------------
-        # YouTube bot verification error
-        # ----------------------------------------------------
-
         if (
             "Sign in to confirm" in error_text
             or "not a bot" in error_text
-            or "confirm you're not a bot" in error_text
+            or "confirm you're not a bot"
+            in error_text
         ):
 
             await status_message.edit_text(
                 "❌ <b>YouTube Access Error</b>\n\n"
+
                 "YouTube က ဒီ server request ကို "
                 "bot traffic လို့ သတ်မှတ်ထားပါတယ်။\n\n"
-                "🔐 YouTube cookies မထည့်ထားသေးတာ "
-                "သို့မဟုတ် cookies သက်တမ်းကုန်နေတာ ဖြစ်နိုင်ပါတယ်။\n\n"
-                "⚙️ Render မှာ <b>cookies.txt</b> Secret File "
-                "ထည့်ပြီး Deploy ပြန်လုပ်ပါ။",
+
+                "🔐 YouTube cookies မရှိတာ၊ "
+                "သက်တမ်းကုန်တာ၊ သို့မဟုတ် "
+                "YouTube server-side verification "
+                "ဖြစ်နေတာ ဖြစ်နိုင်ပါတယ်။\n\n"
+
+                "⚙️ Render မှာ valid "
+                "<b>cookies.txt</b> Secret File "
+                "ရှိ/မရှိ စစ်ပေးပါ။",
+
                 parse_mode="HTML"
             )
 
@@ -729,7 +959,8 @@ async def handle_url(
         )
 
         await status_message.edit_text(
-            "❌ Video Information ရယူရာမှာ Error ဖြစ်သွားပါတယ်။\n\n"
+            "❌ Video Information ရယူရာမှာ "
+            "Error ဖြစ်သွားပါတယ်။\n\n"
             "ခဏနေပြီး ပြန်စမ်းကြည့်ပါ။"
         )
 
@@ -749,10 +980,15 @@ async def download_callback(
 
     data = query.data
 
-    if not data.startswith("download|"):
+    if not data.startswith(
+        "download|"
+    ):
         return
 
-    quality = data.split("|", 1)[1]
+    quality = data.split(
+        "|",
+        1
+    )[1]
 
     url = context.user_data.get(
         "video_url"
@@ -774,9 +1010,12 @@ async def download_callback(
     )
 
     await query.edit_message_text(
-        f"⏳ <b>{quality_label}</b> Download လုပ်နေပါတယ်...\n\n"
+        f"⏳ <b>{quality_label}</b> "
+        "Download လုပ်နေပါတယ်...\n\n"
+
         "📥 Server က file ပြင်ဆင်နေပါတယ်။\n"
         "ခဏစောင့်ပေးပါ...",
+
         parse_mode="HTML"
     )
 
@@ -786,9 +1025,12 @@ async def download_callback(
 
         await context.bot.send_chat_action(
             chat_id=query.message.chat_id,
-            action=ChatAction.UPLOAD_VIDEO
-            if quality != "mp3"
-            else ChatAction.UPLOAD_DOCUMENT
+
+            action=(
+                ChatAction.UPLOAD_VIDEO
+                if quality != "mp3"
+                else ChatAction.UPLOAD_DOCUMENT
+            )
         )
 
         file_path, title = await asyncio.to_thread(
@@ -797,7 +1039,10 @@ async def download_callback(
             quality
         )
 
-        if not file_path or not os.path.exists(file_path):
+        if (
+            not file_path
+            or not os.path.exists(file_path)
+        ):
 
             raise RuntimeError(
                 "Downloaded file not found."
@@ -811,8 +1056,14 @@ async def download_callback(
 
             await query.edit_message_text(
                 "❌ File Size အရမ်းကြီးနေပါတယ်။\n\n"
-                f"📦 Size: {file_size / (1024 * 1024):.1f} MB\n"
-                f"⚠️ ဒီ Bot က {MAX_FILE_SIZE_MB} MB အထိပဲ ပို့ပေးပါတယ်။\n\n"
+
+                f"📦 Size: "
+                f"{file_size / (1024 * 1024):.1f} MB\n"
+
+                f"⚠️ ဒီ Bot က "
+                f"{MAX_FILE_SIZE_MB} MB အထိပဲ "
+                "ပို့ပေးပါတယ်။\n\n"
+
                 "အနိမ့် Quality တစ်ခုကို ရွေးပြီး "
                 "ထပ်စမ်းကြည့်ပါ။"
             )
@@ -838,11 +1089,14 @@ async def download_callback(
                 await context.bot.send_audio(
                     chat_id=query.message.chat_id,
                     audio=audio_file,
+
                     caption=(
                         f"🎵 <b>{title[:500]}</b>\n\n"
                         "✅ MP3 Download Complete"
                     ),
+
                     parse_mode="HTML",
+
                     title=title[:100]
                 )
 
@@ -865,12 +1119,18 @@ async def download_callback(
                 await context.bot.send_video(
                     chat_id=query.message.chat_id,
                     video=video_file,
+
                     caption=(
                         f"🎬 <b>{title[:500]}</b>\n\n"
-                        f"📺 Quality: {quality_label}\n"
+
+                        f"📺 Quality: "
+                        f"{quality_label}\n"
+
                         "✅ Download Complete"
                     ),
+
                     parse_mode="HTML",
+
                     supports_streaming=True
                 )
 
@@ -889,14 +1149,20 @@ async def download_callback(
         if (
             "Sign in to confirm" in error_text
             or "not a bot" in error_text
+            or "confirm you're not a bot"
+            in error_text
         ):
 
             await query.edit_message_text(
                 "❌ <b>YouTube Verification Error</b>\n\n"
-                "YouTube က server ကို bot traffic လို့ "
-                "သတ်မှတ်ထားပါတယ်။\n\n"
-                "🔐 YouTube cookies ကို Render Secret File "
-                "အဖြစ် ထည့်ထားရပါမယ်။",
+
+                "YouTube က ဒီ server ကို "
+                "bot traffic လို့ သတ်မှတ်ထားပါတယ်။\n\n"
+
+                "🔐 Valid YouTube cookies ကို "
+                "Render Secret File အဖြစ် "
+                "ထည့်ထားရပါမယ်။",
+
                 parse_mode="HTML"
             )
 
@@ -904,6 +1170,7 @@ async def download_callback(
 
             await query.edit_message_text(
                 "❌ Download မအောင်မြင်ပါဘူး။\n\n"
+
                 "အခြား Quality တစ်ခုကို ရွေးပြီး "
                 "ထပ်စမ်းကြည့်ပါ။"
             )
@@ -918,6 +1185,7 @@ async def download_callback(
 
         await query.edit_message_text(
             "❌ Download မအောင်မြင်ပါဘူး။\n\n"
+
             "အနိမ့် Quality တစ်ခုကို ရွေးပြီး "
             "ထပ်စမ်းကြည့်ပါ။"
         )
@@ -927,9 +1195,13 @@ async def download_callback(
         if file_path:
 
             try:
-                parent = Path(file_path).parent
+
+                parent = Path(
+                    file_path
+                ).parent
 
                 if parent.exists():
+
                     shutil.rmtree(
                         parent,
                         ignore_errors=True
@@ -965,12 +1237,30 @@ async def error_handler(
 def main():
 
     logger.info(
+        "======================================"
+    )
+
+    logger.info(
         "Starting MM Video Downloader Bot..."
+    )
+
+    logger.info(
+        "yt-dlp version: %s",
+        yt_dlp.version.__version__
     )
 
     logger.info(
         "YouTube cookies path: %s",
         YOUTUBE_COOKIES_FILE
+    )
+
+    logger.info(
+        "YouTube cookies available: %s",
+        bool(get_cookie_file())
+    )
+
+    logger.info(
+        "======================================"
     )
 
     application = (
@@ -979,6 +1269,7 @@ def main():
         .build()
     )
 
+    # /start
     application.add_handler(
         CommandHandler(
             "start",
@@ -986,6 +1277,7 @@ def main():
         )
     )
 
+    # Download buttons
     application.add_handler(
         CallbackQueryHandler(
             download_callback,
@@ -993,6 +1285,7 @@ def main():
         )
     )
 
+    # Developer
     application.add_handler(
         CallbackQueryHandler(
             contact_developer,
@@ -1000,6 +1293,7 @@ def main():
         )
     )
 
+    # URL messages
     application.add_handler(
         MessageHandler(
             filters.TEXT & ~filters.COMMAND,
@@ -1007,6 +1301,7 @@ def main():
         )
     )
 
+    # Errors
     application.add_error_handler(
         error_handler
     )
@@ -1021,5 +1316,10 @@ def main():
     )
 
 
+# ============================================================
+# ENTRY POINT
+# ============================================================
+
 if __name__ == "__main__":
+
     main()
