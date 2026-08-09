@@ -1,5 +1,8 @@
 .env
 __pycache__/
 *.pyc
-downloads/
+*.pyo
 *.log
+downloads/
+.venv/
+venv/
